@@ -3,7 +3,13 @@
  */
 import 'zod-openapi'
 import { z } from 'zod'
-import { registerPath, TypeIdSchema, createItemResponseSchema, asSchema } from '../openapi'
+import {
+  registerPath,
+  TypeIdSchema,
+  createItemResponseSchema,
+  createPaginatedResponseSchema,
+  asSchema,
+} from '../openapi'
 import {
   TimestampSchema,
   NullableTimestampSchema,
@@ -35,6 +41,30 @@ const LinkedPostIdsSchema = z
     example: ['post_01h455vb4pex5vsknk084sn02q'],
   })
 
+// Changelog category (label) schema
+const ChangelogCategorySchema = z.object({
+  id: TypeIdSchema.meta({ example: 'changelog_category_01h455vb4pex5vsknk084sn02q' }),
+  name: z.string().meta({ example: 'Nightly' }),
+  color: HexColorSchema.meta({ example: '#6b7280' }),
+  position: z.number().int().meta({ description: 'Manual sort order', example: 0 }),
+})
+
+// Category summary attached to an entry
+const ChangelogCategorySummarySchema = ChangelogCategorySchema.pick({
+  id: true,
+  name: true,
+  color: true,
+})
+
+const CategoryRefsSchema = z
+  .array(z.string().min(1))
+  .optional()
+  .meta({
+    description:
+      'Categories (labels) to attach. Each value is a category ID or, as a fallback, a label name matched case-insensitively. On update, replaces the existing set; an empty array removes all. Any value that matches no label rejects the request.',
+    example: ['nightly'],
+  })
+
 // Changelog entry schema (API response)
 const ChangelogEntrySchema = z.object({
   id: TypeIdSchema.meta({ example: 'changelog_01h455vb4pex5vsknk084sn02q' }),
@@ -50,6 +80,9 @@ const ChangelogEntrySchema = z.object({
   updatedAt: TimestampSchema,
   linkedPosts: z.array(LinkedPostSchema).meta({
     description: 'Posts linked to this changelog entry',
+  }),
+  categories: z.array(ChangelogCategorySummarySchema).meta({
+    description: 'Categories (labels) attached to this changelog entry',
   }),
 })
 
@@ -68,6 +101,7 @@ const CreateChangelogEntrySchema = z
       .optional()
       .meta({ description: 'Publish date (omit to save as draft)' }),
     linkedPostIds: LinkedPostIdsSchema,
+    categories: CategoryRefsSchema,
   })
   .meta({ description: 'Create changelog entry request body' })
 
@@ -86,6 +120,7 @@ const UpdateChangelogEntrySchema = z
         'Portal display override for published entries. Null clears override. Must not be in the future.',
     }),
     linkedPostIds: LinkedPostIdsSchema,
+    categories: CategoryRefsSchema,
   })
   .meta({ description: 'Update changelog entry request body' })
 
@@ -96,6 +131,33 @@ const ChangelogListResponseSchema = z
     pagination: PaginationMetaSchema,
   })
   .meta({ description: 'Paginated changelog entries' })
+
+// Register GET /changelog/categories
+registerPath('/changelog/categories', {
+  get: {
+    tags: ['Changelog'],
+    summary: 'List changelog categories',
+    description:
+      'Returns the changelog categories (labels) an entry can be tagged with, so a label name can be resolved to its ID',
+    responses: {
+      200: {
+        description: 'List of changelog categories',
+        content: {
+          'application/json': {
+            schema: createPaginatedResponseSchema(
+              ChangelogCategorySchema,
+              'List of changelog categories'
+            ),
+          },
+        },
+      },
+      401: {
+        description: 'Unauthorized',
+        content: { 'application/json': { schema: UnauthorizedErrorSchema } },
+      },
+    },
+  },
+})
 
 // Register GET /changelog
 registerPath('/changelog', {

@@ -13,6 +13,37 @@ describe('changelog OpenAPI contract', () => {
     patch?: { requestBody?: unknown; responses?: unknown }
   }
 
+  const categories = spec.paths?.['/changelog/categories'] as {
+    get?: { responses?: unknown }
+  }
+
+  it('documents categories on create and update bodies', () => {
+    const createBody = JSON.stringify(collection.post?.requestBody)
+    const updateBody = JSON.stringify(detail.patch?.requestBody)
+
+    expect(createBody).toContain('"categories"')
+    expect(updateBody).toContain('"categories"')
+  })
+
+  it('documents categories on list, get, create, and update responses', () => {
+    for (const part of [
+      collection.get,
+      collection.post?.responses,
+      detail.get?.responses,
+      detail.patch?.responses,
+    ]) {
+      expect(JSON.stringify(part)).toContain('"categories"')
+    }
+  })
+
+  it('documents GET /changelog/categories with id, name, color, and position', () => {
+    expect(categories?.get).toBeDefined()
+    const response = JSON.stringify(categories.get?.responses)
+    for (const field of ['"id"', '"name"', '"color"', '"position"']) {
+      expect(response).toContain(field)
+    }
+  })
+
   it('documents linkedPostIds on create and update bodies', () => {
     const createBody = JSON.stringify(collection.post?.requestBody)
     const updateBody = JSON.stringify(detail.patch?.requestBody)

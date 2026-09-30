@@ -681,6 +681,7 @@ describe('MCP HTTP Handler', () => {
       expect(toolNames).toContain('link_ticket')
       expect(toolNames).toContain('unlink_ticket')
       expect(toolNames).toContain('widget_install_status')
+      expect(toolNames).not.toContain('list_changelog_categories')
       expect(toolNames).toHaveLength(39)
     })
 
@@ -700,7 +701,8 @@ describe('MCP HTTP Handler', () => {
       expect(uris).toContain('quackback://roadmaps')
       expect(uris).toContain('quackback://members')
       expect(uris).toContain('quackback://help-center/categories')
-      expect(uris).toHaveLength(6)
+      expect(uris).toContain('quackback://changelog/categories')
+      expect(uris).toHaveLength(7)
     })
 
     // ── search tool (posts) ─────────────────────────────────────────────────

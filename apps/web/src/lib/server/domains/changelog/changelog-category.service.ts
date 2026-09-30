@@ -14,7 +14,7 @@ import {
   changelogCategories,
   changelogEntryCategories,
 } from '@/lib/server/db'
-import type { ChangelogCategoryId, ChangelogId } from '@quackback/ids'
+import { isValidTypeId, type ChangelogCategoryId, type ChangelogId } from '@quackback/ids'
 import { NotFoundError, ValidationError, ConflictError } from '@/lib/shared/errors'
 import { TAXONOMY_DEFAULT_COLOR } from '@/lib/shared/schemas/taxonomy'
 import {
@@ -182,6 +182,42 @@ export async function getCategoriesForEntries(
     map.set(row.changelogEntryId, existing)
   }
   return map
+}
+
+/**
+ * Resolve a mixed list of category references to ids for the public API and
+ * MCP tools. A value shaped like a category TypeID is matched by id and is
+ * never treated as a name; any other value is matched by label name (trimmed,
+ * case-insensitive). Unlike setEntryCategories, an unknown value rejects the
+ * whole list and names every unresolved value, so an integration never
+ * silently loses a label.
+ */
+export async function resolveChangelogCategoryRefs(refs: string[]): Promise<ChangelogCategoryId[]> {
+  if (refs.length === 0) return []
+
+  const categories = await db.query.changelogCategories.findMany({
+    columns: { id: true, name: true },
+  })
+  const byId = new Map(categories.map((c) => [c.id as string, c.id]))
+  const byName = new Map(categories.map((c) => [c.name.trim().toLowerCase(), c.id]))
+
+  const resolved = new Set<ChangelogCategoryId>()
+  const unresolved: string[] = []
+  for (const ref of refs) {
+    const id = isValidTypeId(ref, 'changelog_category')
+      ? byId.get(ref)
+      : byName.get(ref.trim().toLowerCase())
+    if (id) resolved.add(id)
+    else unresolved.push(ref)
+  }
+
+  if (unresolved.length > 0) {
+    throw new ValidationError(
+      'VALIDATION_ERROR',
+      `Unknown changelog categories: ${unresolved.join(', ')}`
+    )
+  }
+  return [...resolved]
 }
 
 /**

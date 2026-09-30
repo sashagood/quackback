@@ -1,6 +1,9 @@
 import { contentJsonToMarkdown } from '@/lib/server/markdown-tiptap'
 import type { TiptapContent } from '@/lib/server/db'
-import type { ChangelogLinkedPost } from '@/lib/server/domains/changelog/changelog.types'
+import type {
+  ChangelogCategorySummary,
+  ChangelogLinkedPost,
+} from '@/lib/server/domains/changelog/changelog.types'
 
 /** Public, stable changelog entry shape for the REST API. */
 export function formatChangelogResponse(entry: {
@@ -13,6 +16,7 @@ export function formatChangelogResponse(entry: {
   createdAt: Date
   updatedAt: Date
   linkedPosts?: ChangelogLinkedPost[]
+  categories?: ChangelogCategorySummary[]
 }) {
   return {
     id: entry.id,
@@ -27,6 +31,11 @@ export function formatChangelogResponse(entry: {
       title: post.title,
       voteCount: post.voteCount,
       status: post.status,
+    })),
+    categories: (entry.categories ?? []).map((category) => ({
+      id: category.id,
+      name: category.name,
+      color: category.color,
     })),
   }
 }

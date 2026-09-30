@@ -8,6 +8,7 @@ import {
   handleDomainError,
 } from '@/lib/server/domains/api/responses'
 import { createChangelog } from '@/lib/server/domains/changelog/changelog.service'
+import { resolveChangelogCategoryRefs } from '@/lib/server/domains/changelog/changelog-category.service'
 import { listChangelogs } from '@/lib/server/domains/changelog/changelog.query'
 import { publishedAtToPublishState } from '@/lib/shared/schemas/changelog'
 import { parseTypeIdArray } from '@/lib/server/domains/api/validation'
@@ -22,6 +23,7 @@ const createChangelogSchema = z.object({
   content: z.string().min(1, 'Content is required'),
   publishedAt: z.string().datetime().optional(),
   linkedPostIds: z.array(z.string()).optional(),
+  categories: z.array(z.string().min(1)).optional(),
 })
 
 export const Route = createFileRoute('/api/v1/changelog/')({
@@ -94,6 +96,13 @@ export const Route = createFileRoute('/api/v1/changelog/')({
           })
           const authorName = principalRecord?.displayName ?? 'API'
 
+          // Category refs are ids or label names; an unknown value rejects the
+          // request (400) rather than silently dropping the label.
+          const categoryIds =
+            parsed.data.categories !== undefined
+              ? await resolveChangelogCategoryRefs(parsed.data.categories)
+              : undefined
+
           const entry = await createChangelog(
             {
               title: parsed.data.title,
@@ -104,6 +113,7 @@ export const Route = createFileRoute('/api/v1/changelog/')({
                 'post',
                 'linked post IDs'
               ),
+              ...(categoryIds !== undefined && { categoryIds }),
             },
             {
               principalId: authResult.principalId,

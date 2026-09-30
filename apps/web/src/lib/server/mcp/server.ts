@@ -187,4 +187,34 @@ export function registerResources(server: McpServer, auth: McpAuthContext) {
       )
     })
   )
+
+  server.resource(
+    'changelog-categories',
+    'quackback://changelog/categories',
+    { description: 'List all changelog categories (labels) an entry can be tagged with' },
+    scopeGated(auth, 'quackback://changelog/categories', async () => {
+      // Team-only, matching the REST endpoint (changelog.view_draft): labels can
+      // be segment-gated, so the raw list must not leak to an OAuth portal user
+      // holding the read:feedback scope.
+      const { isTeamMember } = await import('@/lib/shared/roles')
+      if (!isTeamMember(auth.role)) {
+        return {
+          contents: [
+            {
+              uri: 'quackback://changelog/categories',
+              mimeType: 'text/plain',
+              text: 'Error: This resource requires a team member (admin or member) role.',
+            },
+          ],
+        }
+      }
+      const { listChangelogCategories } =
+        await import('@/lib/server/domains/changelog/changelog-category.service')
+      const categories = await listChangelogCategories()
+      return jsonResource(
+        'changelog/categories',
+        categories.map((c) => ({ id: c.id, name: c.name, color: c.color, position: c.position }))
+      )
+    })
+  )
 }

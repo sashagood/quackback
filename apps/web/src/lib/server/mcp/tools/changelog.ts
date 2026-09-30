@@ -1,6 +1,6 @@
 /**
- * Changelog tools: create, update (incl. publish lifecycle + display date),
- * and soft delete.
+ * Changelog tools: create, update (incl. publish lifecycle, display date, and
+ * categories), and soft delete.
  */
 
 import { z } from 'zod'
@@ -10,6 +10,7 @@ import {
   updateChangelog,
   deleteChangelog,
 } from '@/lib/server/domains/changelog/changelog.service'
+import { resolveChangelogCategoryRefs } from '@/lib/server/domains/changelog/changelog-category.service'
 import { publishedAtToPublishState, type PublishState } from '@/lib/shared/schemas/changelog'
 import type { PostId, ChangelogId } from '@quackback/ids'
 import type { McpAuthContext } from '../types'
@@ -42,6 +43,12 @@ const createChangelogSchema = {
     .describe(
       'ISO 8601 datetime to publish at (e.g. "2025-03-15T12:00:00Z"). Overrides publish flag. Past dates backdate the entry, future dates schedule it.'
     ),
+  categories: z
+    .array(z.string())
+    .optional()
+    .describe(
+      'Categories (labels) to attach: category TypeIDs (use quackback://changelog/categories resource to find IDs), or label names as a fallback (case-insensitive). Any unknown value fails the call.'
+    ),
 }
 
 const updateChangelogSchema = {
@@ -70,6 +77,12 @@ const updateChangelogSchema = {
     .array(z.string())
     .optional()
     .describe('Replace linked posts with these post TypeIDs'),
+  categories: z
+    .array(z.string())
+    .optional()
+    .describe(
+      'Replace attached categories (labels): category TypeIDs (use quackback://changelog/categories resource to find IDs), or label names as a fallback (case-insensitive). An empty array clears them. Any unknown value fails the call.'
+    ),
 }
 
 const deleteChangelogSchema = {
@@ -87,6 +100,7 @@ type CreateChangelogArgs = {
   content: string
   publish: boolean
   publishedAt?: string
+  categories?: string[]
 }
 
 type UpdateChangelogArgs = {
@@ -97,6 +111,7 @@ type UpdateChangelogArgs = {
   publishedAt?: string
   displayDate?: string | null
   linkedPostIds?: string[]
+  categories?: string[]
 }
 
 type DeleteChangelogArgs = { changelogId: string }
@@ -113,7 +128,8 @@ export function registerChangelogTools(server: McpServer, auth: McpAuthContext) 
 Examples:
 - Draft: create_changelog({ title: "v2.1 Release", content: "## New features\\n- Dark mode..." })
 - Published: create_changelog({ title: "v2.1 Release", content: "## New features\\n- Dark mode...", publish: true })
-- Backdated: create_changelog({ title: "v2.1 Release", content: "...", publishedAt: "2025-03-15T12:00:00Z" })${CONTENT_FORMAT_BLOCK}`,
+- Backdated: create_changelog({ title: "v2.1 Release", content: "...", publishedAt: "2025-03-15T12:00:00Z" })
+- Labelled: create_changelog({ title: "Nightly 2026-09-30", content: "...", publish: true, categories: ["nightly"] })${CONTENT_FORMAT_BLOCK}`,
     schema: createChangelogSchema,
     annotations: WRITE,
     scope: 'write:changelog',
@@ -122,11 +138,16 @@ Examples:
       const publishState = args.publishedAt
         ? publishedAtToPublishState(args.publishedAt)
         : ({ type: args.publish ? 'published' : 'draft' } as const)
+      const categoryIds =
+        args.categories !== undefined
+          ? await resolveChangelogCategoryRefs(args.categories)
+          : undefined
       const result = await createChangelog(
         {
           title: args.title,
           content: args.content,
           publishState,
+          ...(categoryIds !== undefined && { categoryIds }),
         },
         { principalId: auth.principalId, name: auth.name }
       )
@@ -143,14 +164,15 @@ Examples:
 
   registerTool<UpdateChangelogArgs>(server, auth, {
     name: 'update_changelog',
-    description: `Update title, content, publish state, and/or linked posts on an existing changelog entry.
+    description: `Update title, content, publish state, categories, and/or linked posts on an existing changelog entry.
 
 Examples:
 - Update title: update_changelog({ changelogId: "changelog_01abc...", title: "v2.0 Release" })
 - Publish: update_changelog({ changelogId: "changelog_01abc...", publish: true })
 - Backdate display: update_changelog({ changelogId: "changelog_01abc...", displayDate: "2025-03-15T12:00:00Z" })
 - Clear display override: update_changelog({ changelogId: "changelog_01abc...", displayDate: null })
-- Link posts: update_changelog({ changelogId: "changelog_01abc...", linkedPostIds: ["post_01a...", "post_01b..."] })${CONTENT_FORMAT_BLOCK}`,
+- Link posts: update_changelog({ changelogId: "changelog_01abc...", linkedPostIds: ["post_01a...", "post_01b..."] })
+- Set labels: update_changelog({ changelogId: "changelog_01abc...", categories: ["alpha"] })${CONTENT_FORMAT_BLOCK}`,
     schema: updateChangelogSchema,
     annotations: WRITE,
     scope: 'write:changelog',
@@ -165,11 +187,17 @@ Examples:
         publishState = { type: 'draft' }
       }
 
+      const categoryIds =
+        args.categories !== undefined
+          ? await resolveChangelogCategoryRefs(args.categories)
+          : undefined
+
       const result = await updateChangelog(args.changelogId as ChangelogId, {
         title: args.title,
         content: args.content,
         linkedPostIds: args.linkedPostIds as PostId[] | undefined,
         publishState,
+        ...(categoryIds !== undefined && { categoryIds }),
         ...(args.displayDate !== undefined && {
           displayDate: args.displayDate === null ? null : new Date(args.displayDate),
         }),
