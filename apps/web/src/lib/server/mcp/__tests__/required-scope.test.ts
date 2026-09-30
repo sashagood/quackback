@@ -30,6 +30,17 @@ describe('requiredScopeForMcpRpc', () => {
     expect(requiredScopeForMcpRpc(toolsCall('reply_to_conversation'))).toBe('write:chat')
   })
 
+  it('maps the changelog categories resource to read:feedback like other changelog reads', () => {
+    expect(
+      requiredScopeForMcpRpc({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'resources/read',
+        params: { uri: 'quackback://changelog/categories' },
+      })
+    ).toBe('read:feedback')
+  })
+
   it('maps search posts to read:feedback and articles to read:article', () => {
     expect(requiredScopeForMcpRpc(toolsCall('search', { query: 'x' }))).toBe('read:feedback')
     expect(requiredScopeForMcpRpc(toolsCall('search', { entity: 'posts' }))).toBe('read:feedback')

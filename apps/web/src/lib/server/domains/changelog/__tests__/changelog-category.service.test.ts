@@ -157,3 +157,53 @@ describe('reorderChangelogCategories', () => {
     await expect(reorderChangelogCategories([])).rejects.toBeInstanceOf(ValidationError)
   })
 })
+
+describe('resolveChangelogCategoryRefs', () => {
+  const NIGHTLY_ID = 'changelog_category_01h455vb4pex5vsknk084sn02q' as ChangelogCategoryId
+  const ALPHA_ID = 'changelog_category_01h455vb4pex5vsknk084sn02r' as ChangelogCategoryId
+
+  beforeEach(() => {
+    mockCategoryFindMany.mockResolvedValue([
+      { id: NIGHTLY_ID, name: 'Nightly' },
+      { id: ALPHA_ID, name: 'Alpha' },
+    ])
+  })
+
+  it('returns an empty list for no refs without touching the database', async () => {
+    const { resolveChangelogCategoryRefs } = await import('../changelog-category.service')
+    await expect(resolveChangelogCategoryRefs([])).resolves.toEqual([])
+    expect(mockCategoryFindMany).not.toHaveBeenCalled()
+  })
+
+  it('resolves category TypeIDs directly', async () => {
+    const { resolveChangelogCategoryRefs } = await import('../changelog-category.service')
+    await expect(resolveChangelogCategoryRefs([ALPHA_ID])).resolves.toEqual([ALPHA_ID])
+  })
+
+  it('falls back to a case-insensitive name match', async () => {
+    const { resolveChangelogCategoryRefs } = await import('../changelog-category.service')
+    await expect(resolveChangelogCategoryRefs(['nightly', ' ALPHA '])).resolves.toEqual([
+      NIGHTLY_ID,
+      ALPHA_ID,
+    ])
+  })
+
+  it('de-duplicates when the same category is referenced by id and by name', async () => {
+    const { resolveChangelogCategoryRefs } = await import('../changelog-category.service')
+    await expect(resolveChangelogCategoryRefs([NIGHTLY_ID, 'Nightly'])).resolves.toEqual([
+      NIGHTLY_ID,
+    ])
+  })
+
+  it('rejects unknown ids and names, naming each unresolved value', async () => {
+    const { resolveChangelogCategoryRefs } = await import('../changelog-category.service')
+    const unknownId = 'changelog_category_01h455vb4pex5vsknk084sn02z'
+    await expect(
+      resolveChangelogCategoryRefs(['nightly', 'beta', unknownId])
+    ).rejects.toMatchObject({
+      constructor: ValidationError,
+      message: expect.stringContaining('beta'),
+    })
+    await expect(resolveChangelogCategoryRefs(['beta', unknownId])).rejects.toThrow(unknownId)
+  })
+})

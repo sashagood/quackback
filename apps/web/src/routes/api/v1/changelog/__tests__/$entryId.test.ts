@@ -4,6 +4,7 @@ import type { ChangelogId } from '@quackback/ids'
 const mockWithApiKeyAuth = vi.fn()
 const mockGetChangelogById = vi.fn()
 const mockUpdateChangelog = vi.fn()
+const mockResolveCategoryRefs = vi.fn()
 
 vi.mock('@tanstack/react-router', () => ({
   createFileRoute: vi.fn(() => (opts: unknown) => ({ options: opts })),
@@ -15,6 +16,10 @@ vi.mock('@/lib/server/domains/changelog/changelog.service', () => ({
   getChangelogById: (...args: unknown[]) => mockGetChangelogById(...args),
   updateChangelog: (...args: unknown[]) => mockUpdateChangelog(...args),
   deleteChangelog: vi.fn(),
+}))
+
+vi.mock('@/lib/server/domains/changelog/changelog-category.service', () => ({
+  resolveChangelogCategoryRefs: (...args: unknown[]) => mockResolveCategoryRefs(...args),
 }))
 
 // markdown-tiptap is intentionally NOT mocked — the point of these tests is the
@@ -32,6 +37,10 @@ const { GET, PATCH } = (Route as unknown as { options: RouteOpts }).options.serv
 const ENTRY_ID = 'changelog_01h455vb4pex5vsknk084sn02q' as unknown as ChangelogId
 const POST_A = 'post_01h455vb4pex5vsknk084sn02q'
 const POST_B = 'post_01h455vb4pex5vsknk084sn02r'
+const NIGHTLY_ID = 'changelog_category_01h455vb4pex5vsknk084sn02q'
+const ALPHA_ID = 'changelog_category_01h455vb4pex5vsknk084sn02r'
+const NIGHTLY = { id: NIGHTLY_ID, name: 'Nightly', color: '#6b7280' }
+const ALPHA = { id: ALPHA_ID, name: 'Alpha', color: '#22c55e' }
 
 function linkedPost(id: string, title: string) {
   return {
@@ -53,6 +62,7 @@ function baseEntry() {
     createdAt: new Date('2026-01-01T00:00:00.000Z'),
     updatedAt: new Date('2026-01-01T00:00:00.000Z'),
     linkedPosts: [] as ReturnType<typeof linkedPost>[],
+    categories: [] as Array<{ id: string; name: string; color: string }>,
   }
 }
 
@@ -198,6 +208,80 @@ describe('PATCH /api/v1/changelog/:entryId — linkedPostIds', () => {
     })
 
     expect(res.status).toBe(400)
+    expect(mockUpdateChangelog).not.toHaveBeenCalled()
+  })
+})
+
+describe('GET /api/v1/changelog/:entryId — categories', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockWithApiKeyAuth.mockResolvedValue({ principalId: 'principal_x', role: 'team' })
+  })
+
+  it('includes categories on the public API representation', async () => {
+    mockGetChangelogById.mockResolvedValue({ ...baseEntry(), categories: [NIGHTLY, ALPHA] })
+
+    const res = await GET({ request: new Request('http://t/'), params: { entryId: ENTRY_ID } })
+    const json = await res.json()
+    expect(json.data.categories).toEqual([NIGHTLY, ALPHA])
+  })
+})
+
+describe('PATCH /api/v1/changelog/:entryId — categories', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockWithApiKeyAuth.mockResolvedValue({ principalId: 'principal_x', role: 'team' })
+    mockResolveCategoryRefs.mockResolvedValue([ALPHA_ID])
+    mockUpdateChangelog.mockResolvedValue({ ...baseEntry(), categories: [ALPHA] })
+  })
+
+  it('resolves category refs and forwards the ids to updateChangelog', async () => {
+    const res = await PATCH({
+      request: patchRequest({ categories: [ALPHA_ID] }),
+      params: { entryId: ENTRY_ID },
+    })
+
+    expect(res.status).toBe(200)
+    expect(mockResolveCategoryRefs).toHaveBeenCalledWith([ALPHA_ID])
+    expect(mockUpdateChangelog.mock.calls[0][1]).toMatchObject({ categoryIds: [ALPHA_ID] })
+    const json = await res.json()
+    expect(json.data.categories).toEqual([ALPHA])
+  })
+
+  it('forwards an empty list so existing categories can be cleared', async () => {
+    mockResolveCategoryRefs.mockResolvedValue([])
+    mockUpdateChangelog.mockResolvedValue(baseEntry())
+
+    const res = await PATCH({
+      request: patchRequest({ categories: [] }),
+      params: { entryId: ENTRY_ID },
+    })
+
+    expect(res.status).toBe(200)
+    expect(mockUpdateChangelog.mock.calls[0][1]).toMatchObject({ categoryIds: [] })
+  })
+
+  it('does not send categoryIds when the field is omitted', async () => {
+    await PATCH({ request: patchRequest({ title: 'Renamed' }), params: { entryId: ENTRY_ID } })
+
+    expect(mockResolveCategoryRefs).not.toHaveBeenCalled()
+    const input = mockUpdateChangelog.mock.calls[0][1] as Record<string, unknown>
+    expect(input).not.toHaveProperty('categoryIds')
+  })
+
+  it('returns 400 naming the unknown category without calling updateChangelog', async () => {
+    const { ValidationError } = await import('@/lib/shared/errors')
+    mockResolveCategoryRefs.mockRejectedValue(
+      new ValidationError('VALIDATION_ERROR', 'Unknown changelog categories: beta')
+    )
+
+    const res = await PATCH({
+      request: patchRequest({ categories: ['beta'] }),
+      params: { entryId: ENTRY_ID },
+    })
+
+    expect(res.status).toBe(400)
+    expect(await res.text()).toContain('beta')
     expect(mockUpdateChangelog).not.toHaveBeenCalled()
   })
 })

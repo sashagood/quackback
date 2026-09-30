@@ -53,6 +53,7 @@ export const RESOURCE_SCOPES: Readonly<Record<string, McpScope>> = {
   'quackback://roadmaps': 'read:feedback',
   'quackback://members': 'read:feedback',
   'quackback://help-center/categories': 'read:article',
+  'quackback://changelog/categories': 'read:feedback',
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

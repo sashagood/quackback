@@ -13,6 +13,7 @@ import {
   updateChangelog,
   deleteChangelog,
 } from '@/lib/server/domains/changelog/changelog.service'
+import { resolveChangelogCategoryRefs } from '@/lib/server/domains/changelog/changelog-category.service'
 import type { PublishState } from '@/lib/shared/schemas/changelog'
 import { PERMISSIONS } from '@/lib/shared/permissions'
 import type { ChangelogId, PostId } from '@quackback/ids'
@@ -25,6 +26,7 @@ const updateChangelogSchema = z.object({
   publishedAt: z.string().datetime().nullable().optional(),
   displayDate: z.string().datetime().nullable().optional(),
   linkedPostIds: z.array(z.string()).optional(),
+  categories: z.array(z.string().min(1)).optional(),
 })
 
 export const Route = createFileRoute('/api/v1/changelog/$entryId')({
@@ -94,6 +96,11 @@ export const Route = createFileRoute('/api/v1/changelog/$entryId')({
             'linked post IDs'
           )
 
+          const categoryIds =
+            parsed.data.categories !== undefined
+              ? await resolveChangelogCategoryRefs(parsed.data.categories)
+              : undefined
+
           const updated = await updateChangelog(entryId, {
             title: parsed.data.title,
             content: parsed.data.content,
@@ -103,6 +110,7 @@ export const Route = createFileRoute('/api/v1/changelog/$entryId')({
                 parsed.data.displayDate === null ? null : new Date(parsed.data.displayDate),
             }),
             ...(linkedPostIds !== undefined && { linkedPostIds }),
+            ...(categoryIds !== undefined && { categoryIds }),
           })
 
           return successResponse(formatChangelogResponse(updated))
