@@ -38,8 +38,14 @@ interface LinearConfigProps {
 const EVENT_CONFIG = [
   {
     id: 'post.created' as const,
-    label: 'Create issue from new feedback',
-    description: 'Automatically create a Linear issue when new feedback is submitted',
+    label: 'Create and update feedback issues',
+    description:
+      'Create a Linear issue for new feedback and keep its title, text, images, and videos current after edits',
+  },
+  {
+    id: 'comment.created' as const,
+    label: 'Sync public comments',
+    description: 'Add new public feedback comments to the linked Linear issue',
   },
 ]
 
@@ -190,7 +196,7 @@ export function LinearConfig({
 
       <div className="space-y-3">
         <Label className="text-base font-medium">Events</Label>
-        <p className="text-xs text-muted-foreground">Choose which events trigger issue creation</p>
+        <p className="text-xs text-muted-foreground">Choose what to sync with Linear</p>
         <div className="space-y-3 pt-2">
           {EVENT_CONFIG.map((event) => (
             <div

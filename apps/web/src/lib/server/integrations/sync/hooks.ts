@@ -2,6 +2,7 @@ import {
   db,
   eq,
   and,
+  inArray,
   sql,
   integrations,
   integrationEventMappings,
@@ -16,6 +17,7 @@ import {
 import type { IntegrationId, PostId, TicketId, PostCommentId, ChangelogId } from '@quackback/ids'
 import type { HookJobData } from '@/lib/server/events/hook-job'
 import { getIntegration } from '../index'
+import { mappingEventTypesFor } from '@/lib/server/events/resolvers/integration.resolver'
 import { getExecuteRows } from '@/lib/server/utils/execute-rows'
 import type { JobSqlExecutor } from '@/lib/server/jobs/job-queue'
 import { getBaseUrl } from '@/lib/server/config'
@@ -142,7 +144,7 @@ export async function executeHookSync(
   const mappings = await db.query.integrationEventMappings.findMany({
     where: and(
       eq(integrationEventMappings.integrationId, integration.id),
-      eq(integrationEventMappings.eventType, event.type),
+      inArray(integrationEventMappings.eventType, mappingEventTypesFor(hookType, event.type)),
       eq(integrationEventMappings.enabled, true)
     ),
   })

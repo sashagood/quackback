@@ -2,7 +2,7 @@
  * Linear issue formatting utilities.
  */
 
-import type { EventData } from '@/lib/server/events/types'
+import type { CommentCreatedEvent, EventData, EventPostData } from '@/lib/server/events/types'
 import { buildIntegrationPostContent } from '@/lib/server/integrations/post-content'
 import { buildPostUrl, getAuthorName } from '@/lib/server/integrations/message-utils'
 
@@ -16,8 +16,14 @@ export function buildLinearIssueBody(
   if (event.type !== 'post.created') {
     return { title: 'Feedback', description: '' }
   }
+  return buildLinearIssueBodyFromPost(event.data.post, rootUrl)
+}
 
-  const { post } = event.data
+/** Build the Linear issue title and description from the current post content. */
+export function buildLinearIssueBodyFromPost(
+  post: EventPostData,
+  rootUrl: string
+): { title: string; description: string } {
   const postUrl = buildPostUrl(rootUrl, post.boardSlug, post.id)
   const content = buildIntegrationPostContent(post.content, rootUrl, { embedVideos: true })
   const author = getAuthorName(post)
@@ -32,4 +38,23 @@ export function buildLinearIssueBody(
   ].join('\n')
 
   return { title: post.title, description }
+}
+
+/** Build the Linear comment body for a newly published public Quackback comment. */
+export function buildLinearCommentBody(event: CommentCreatedEvent, rootUrl: string): string {
+  const { comment, post } = event.data
+  const author = getAuthorName(comment)
+  const content = buildIntegrationPostContent(comment.content, rootUrl, {
+    embedVideos: true,
+    maxLength: 5000,
+  })
+  const commentUrl = `${buildPostUrl(rootUrl, post.boardSlug, post.id)}#comment-${comment.id}`
+
+  return [
+    `**${author} commented:**`,
+    '',
+    content,
+    '',
+    `[View comment in Quackback](${commentUrl})`,
+  ].join('\n')
 }
