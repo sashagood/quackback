@@ -25,6 +25,25 @@ export interface CachedMapping {
   filters: unknown
 }
 
+/**
+ * Mapping event types that authorize delivering `eventType` to `integrationType`.
+ * A Linear issue created from feedback stays the same linked issue when the post
+ * is edited, so edits ride the issue-creation mapping: every connection that
+ * creates issues also refreshes them, with no second setting that can drift.
+ */
+export function mappingEventTypesFor(integrationType: string, eventType: string): string[] {
+  if (eventType === 'post.updated' && integrationType === 'linear')
+    return ['post.updated', 'post.created']
+  return [eventType]
+}
+
+export function integrationMappingMatchesEvent(
+  mapping: Pick<CachedMapping, 'eventType' | 'integrationType'>,
+  eventType: string
+): boolean {
+  return mappingEventTypesFor(mapping.integrationType, eventType).includes(mapping.eventType)
+}
+
 async function loadMappings(): Promise<CachedMapping[]> {
   const cached = await cacheGet<CachedMapping[]>(CACHE_KEYS.INTEGRATION_MAPPINGS)
   if (cached?.every((mapping) => typeof mapping.integrationId === 'string')) return cached
@@ -58,7 +77,7 @@ export function buildIntegrationTargets(
   const seen = new Set<string>()
 
   for (const m of mappings) {
-    if (m.eventType !== eventType || !m.integrationId) continue
+    if (!integrationMappingMatchesEvent(m, eventType) || !m.integrationId) continue
 
     const filters = m.filters as { boardIds?: string[] } | null
     if (
@@ -115,7 +134,7 @@ export const integrationResolver: SinkResolver = {
   async resolve(event: DomainEvent): Promise<HookTarget[]> {
     if (isPrivateComment(event)) return []
     const mappings = await loadMappings()
-    const relevant = mappings.filter((m) => m.eventType === event.type)
+    const relevant = mappings.filter((m) => integrationMappingMatchesEvent(m, event.type))
     if (relevant.length === 0) return []
     return buildIntegrationTargets(relevant, event.type, boardIdsFromEvent(event))
   },

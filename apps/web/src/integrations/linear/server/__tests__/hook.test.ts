@@ -3,7 +3,12 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import type { PostCreatedEvent, CommentCreatedEvent, EventData } from '@/lib/server/events/types'
+import type {
+  PostCreatedEvent,
+  PostUpdatedEvent,
+  CommentCreatedEvent,
+  EventData,
+} from '@/lib/server/events/types'
 
 const findLink = vi.hoisted(() => vi.fn())
 const findPendingCreate = vi.hoisted(() => vi.fn())
@@ -67,6 +72,29 @@ function makeCommentCreatedEvent(overrides: Record<string, unknown> = {}): Comme
         ...overrides,
       },
       post: { id: 'post_1', title: 'Bug report', boardId: 'board_1', boardSlug: 'bugs' },
+    },
+  }
+}
+
+function makePostUpdatedEvent(changedFields = ['content']): PostUpdatedEvent {
+  return {
+    id: 'evt-3',
+    type: 'post.updated',
+    timestamp: '2025-01-01T00:00:00Z',
+    actor: { type: 'user', userId: 'user_1', email: 'test@test.com' },
+    data: {
+      // The sync worker re-reads the post before dispatch, so the hook sees the
+      // full post, not just the reference the event was published with.
+      post: {
+        id: 'post_1',
+        title: 'Updated bug report',
+        content: '<p>Now with steps</p>',
+        boardId: 'board_1',
+        boardSlug: 'bugs',
+        voteCount: 3,
+        authorName: 'Jane Doe',
+      } as PostUpdatedEvent['data']['post'],
+      changedFields,
     },
   }
 }
@@ -255,6 +283,89 @@ describe('linearHook', () => {
       const result = await linearHook.run(makeCommentCreatedEvent(), target, config)
 
       expect(result).toEqual({ state: 'uncertain', errorCode: 'outcome_unknown' })
+    })
+  })
+
+  describe('post.updated', () => {
+    it('refreshes the linked issue title and description after a title or content edit', async () => {
+      findLink.mockResolvedValue({ externalId: 'uuid-issue-1' })
+      const fetchMock = mockFetch(200, {
+        data: {
+          issueUpdate: {
+            success: true,
+            issue: { id: 'uuid-issue-1', identifier: 'QUA-42', url: 'https://linear.app/i/QUA-42' },
+          },
+        },
+      })
+      vi.stubGlobal('fetch', fetchMock)
+
+      const result = await linearHook.run(
+        makePostUpdatedEvent(['title', 'content']),
+        target,
+        config
+      )
+
+      expect(result).toEqual({
+        state: 'succeeded',
+        result: {
+          externalId: 'uuid-issue-1',
+          externalDisplayId: 'QUA-42',
+          externalUrl: 'https://linear.app/i/QUA-42',
+        },
+      })
+      const body = JSON.parse(fetchMock.mock.calls[0][1].body)
+      expect(body.query).toContain('issueUpdate')
+      expect(body.variables.id).toBe('uuid-issue-1')
+      expect(body.variables.input.title).toBe('Updated bug report')
+      expect(body.variables.input.description).toContain('Now with steps')
+      expect(body.variables.input.description).toContain('**Submitted by:** Jane Doe')
+    })
+
+    it('ignores edits that touch neither title nor content', async () => {
+      findLink.mockResolvedValue({ externalId: 'uuid-issue-1' })
+      const fetchMock = mockFetch(200, {})
+      vi.stubGlobal('fetch', fetchMock)
+
+      const result = await linearHook.run(makePostUpdatedEvent(['tags', 'owner']), target, config)
+
+      expect(result).toEqual({ state: 'succeeded' })
+      expect(fetchMock).not.toHaveBeenCalled()
+    })
+
+    it('waits while the issue for the post is still being created', async () => {
+      findLink.mockResolvedValue(undefined)
+      findPendingCreate.mockResolvedValue({ id: 'op_1', state: 'running' })
+      const fetchMock = mockFetch(200, {})
+      vi.stubGlobal('fetch', fetchMock)
+
+      const result = await linearHook.run(makePostUpdatedEvent(['title']), target, config)
+
+      expect(result).toEqual({
+        state: 'retry_wait',
+        errorCode: 'unavailable',
+        retryAfterMs: expect.any(Number),
+      })
+      expect(fetchMock).not.toHaveBeenCalled()
+    })
+
+    it('does nothing when the post has no linked Linear issue', async () => {
+      findLink.mockResolvedValue(undefined)
+      const fetchMock = mockFetch(200, {})
+      vi.stubGlobal('fetch', fetchMock)
+
+      const result = await linearHook.run(makePostUpdatedEvent(['title']), target, config)
+
+      expect(result).toEqual({ state: 'succeeded' })
+      expect(fetchMock).not.toHaveBeenCalled()
+    })
+
+    it('returns auth_required when Linear rejects the token', async () => {
+      findLink.mockResolvedValue({ externalId: 'uuid-issue-1' })
+      vi.stubGlobal('fetch', mockFetch(401))
+
+      const result = await linearHook.run(makePostUpdatedEvent(['content']), target, config)
+
+      expect(result).toEqual({ state: 'auth_required', errorCode: 'authentication' })
     })
   })
 })

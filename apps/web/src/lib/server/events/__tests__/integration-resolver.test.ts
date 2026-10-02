@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest'
-import { buildIntegrationTargets, type CachedMapping } from '../resolvers/integration.resolver'
+import {
+  buildIntegrationTargets,
+  mappingEventTypesFor,
+  type CachedMapping,
+} from '../resolvers/integration.resolver'
 function mapping(over: Partial<CachedMapping> = {}): CachedMapping {
   return {
     eventType: 'post.created',
@@ -60,5 +64,25 @@ describe('integration routing', () => {
     expect(
       buildIntegrationTargets([mapping({ eventType: 'comment.created' })], 'post.created', [])
     ).toHaveLength(0)
+  })
+  it('routes Linear post edits through the existing issue-creation mapping', () => {
+    const linear = mapping({ integrationType: 'linear', actionConfig: { channelId: 'team_1' } })
+    expect(buildIntegrationTargets([linear], 'post.updated', [])).toEqual([
+      {
+        type: 'linear',
+        target: { channelId: 'team_1' },
+        config: { integrationId: 'integration-test' },
+      },
+    ])
+  })
+  it('does not route post edits through another provider creation mapping', () => {
+    expect(
+      buildIntegrationTargets([mapping({ integrationType: 'github' })], 'post.updated', [])
+    ).toHaveLength(0)
+  })
+  it('names the mapping types that authorize an event for a provider', () => {
+    expect(mappingEventTypesFor('linear', 'post.updated')).toEqual(['post.updated', 'post.created'])
+    expect(mappingEventTypesFor('github', 'post.updated')).toEqual(['post.updated'])
+    expect(mappingEventTypesFor('linear', 'comment.created')).toEqual(['comment.created'])
   })
 })

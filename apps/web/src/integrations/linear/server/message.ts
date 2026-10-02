@@ -2,7 +2,7 @@
  * Linear issue formatting utilities.
  */
 
-import type { CommentCreatedEvent, EventData } from '@/lib/server/events/types'
+import type { CommentCreatedEvent, EventData, EventPostData } from '@/lib/server/events/types'
 import { buildIntegrationPostContent } from '@/lib/server/integrations/post-content'
 import { buildPostUrl, getAuthorName } from '@/lib/server/integrations/message-utils'
 
@@ -16,8 +16,14 @@ export function buildLinearIssueBody(
   if (event.type !== 'post.created') {
     return { title: 'Feedback', description: '' }
   }
+  return buildLinearIssueBodyFromPost(event.data.post, rootUrl)
+}
 
-  const { post } = event.data
+/** Build the Linear issue title and description from the current post content. */
+export function buildLinearIssueBodyFromPost(
+  post: EventPostData,
+  rootUrl: string
+): { title: string; description: string } {
   const postUrl = buildPostUrl(rootUrl, post.boardSlug, post.id)
   const content = buildIntegrationPostContent(post.content, rootUrl, { embedVideos: true })
   const author = getAuthorName(post)
