@@ -1,4 +1,4 @@
-import { stripHtml, truncate } from '@/lib/server/events/hook-utils'
+import { truncate } from '@/lib/server/events/hook-utils'
 
 type PostMedia = {
   kind: 'image' | 'video'
@@ -94,6 +94,36 @@ function mediaMarkdown(media: PostMedia, embedVideos: boolean): string {
   return `![${media.label || 'Screenshot'}](${media.url})`
 }
 
+const HTML_ENTITIES: Record<string, string> = {
+  '&nbsp;': ' ',
+  '&amp;': '&',
+  '&lt;': '<',
+  '&gt;': '>',
+  '&quot;': '"',
+  '&#39;': "'",
+}
+
+/**
+ * Drop HTML tags and decode entities like `stripHtml`, but keep line breaks.
+ * The providers behind this helper render Markdown, where a newline is
+ * structure: collapsing it merges list items, headings and paragraphs into
+ * one run-on line.
+ */
+export function stripHtmlKeepLines(html: string): string {
+  let text = html
+  let previous: string
+  do {
+    previous = text
+    text = text.replace(/<[a-z!/][^>]*>?/gi, '')
+  } while (text !== previous)
+  return text
+    .replace(/&(?:nbsp|amp|lt|gt|quot|#39);/g, (m) => HTML_ENTITIES[m])
+    .replace(/[^\S\n]+/g, ' ')
+    .replace(/ ?\n ?/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
 /** Keep media complete and fetchable even when the narrative is shortened. */
 export function buildIntegrationPostContent(
   source: string,
@@ -102,7 +132,7 @@ export function buildIntegrationPostContent(
 ): string {
   const { embedVideos = false, maxLength = 2000 } = options
   const media = extractMedia(source, rootUrl)
-  const markdown = absolutizeMarkdownUrls(stripHtml(source), rootUrl, embedVideos)
+  const markdown = absolutizeMarkdownUrls(stripHtmlKeepLines(source), rootUrl, embedVideos)
   let content = truncate(markdown, maxLength)
   if (markdown.length > maxLength) {
     const cutoff = maxLength - 3
