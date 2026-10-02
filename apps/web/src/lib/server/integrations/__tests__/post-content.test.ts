@@ -56,4 +56,21 @@ describe('shared integration media content', () => {
       `![Video: clip](${root}/clip.mp4)`
     )
   })
+
+  it('keeps paragraphs and list items on their own lines for Markdown providers', () => {
+    const md =
+      '1. With "device level toggle" I meant, local level scope.\n2. Reviewing is the use-case.\n\n### Required solution\n\n- bullet a\n- bullet b'
+    const out = buildIntegrationPostContent(md, 'https://say.any.org')
+
+    expect(out).toBe(md)
+  })
+
+  it('still collapses runs of spaces and tags inside a line', () => {
+    const out = buildIntegrationPostContent(
+      '<p>Hello   <b>there</b></p>\n\n\n\n<p>Next</p>',
+      'https://x.test'
+    )
+
+    expect(out).toBe('Hello there\n\nNext')
+  })
 })
