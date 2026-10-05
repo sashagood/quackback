@@ -50,6 +50,7 @@ import { useWidgetMediaUpload, WidgetSessionError } from './use-widget-image-upl
 import type { JSONContent } from '@tiptap/react'
 import type { EditorDocument } from '@/components/ui/rich-text-editor'
 import type { TiptapContent } from '@/lib/shared/schemas/posts'
+import { usePostTemplateDraft } from '@/components/shared/use-post-template-draft'
 import {
   composeBodyFromPlainText,
   resolveComposeBoardId,
@@ -89,6 +90,8 @@ interface BoardInfo {
   id: string
   name: string
   slug: string
+  /** H2 question headings prefilled into a new post on this board (PRO-529). */
+  template?: string[]
 }
 
 export interface WidgetHomeProps {
@@ -473,10 +476,6 @@ export function WidgetHomeAnimated({
     resolveComposeBoardId(boards, undefined, defaultBoard)
   )
   const composeBoardDirtyRef = useRef(false)
-  const handleComposeBoardChange = useCallback((id: string) => {
-    composeBoardDirtyRef.current = true
-    setSelectedBoardId(id)
-  }, [])
   // The details as written. Typing keeps them here rather than in state, so a
   // keystroke never re-renders the composer around the editor; the post reads
   // them (serialized once) when it is submitted. Only the open composer's
@@ -490,6 +489,35 @@ export function WidgetHomeAnimated({
   const handleEditorChange = useCallback((document: EditorDocument) => {
     if (expandedRef.current) detailsRef.current = document
   }, [])
+
+  // The board's post template (PRO-529). A host prefill (`editorContent`)
+  // seeds the body; a template applies only over an untouched body, so the
+  // two never fight. Whether to offer "Insert template" is decided when the
+  // board changes, from the body as it is then (no re-render per keystroke).
+  const draft = usePostTemplateDraft()
+  const [showInsertTemplate, setShowInsertTemplate] = useState(false)
+  const selectedBoard = boards.find((b) => b.id === selectedBoardId)
+  const currentDoc = () => (detailsRef.current?.json() as TiptapContent | undefined) ?? null
+  const handleComposeBoardChange = useCallback(
+    (id: string) => {
+      composeBoardDirtyRef.current = true
+      setSelectedBoardId(id)
+      const next = boards.find((b) => b.id === id)?.template
+      const replaced = draft.applyTemplate(next, currentDoc())
+      setShowInsertTemplate(!replaced && (next?.length ?? 0) > 0)
+    },
+    // oxlint-disable-next-line react-hooks/exhaustive-deps -- currentDoc reads a ref
+    [boards, draft]
+  )
+
+  // Seed the body from the selected board each time the composer opens,
+  // unless a host prefill already put a body in place for this open.
+  useEffect(() => {
+    if (!expanded) return
+    if (editorContent) return
+    draft.applyTemplate(selectedBoard?.template, currentDoc())
+    // oxlint-disable-next-line react-hooks/exhaustive-deps -- seed once per expand
+  }, [expanded])
 
   // Host `open({ view: 'new-post' })` lands here. Nonce (not title/board) is
   // the trigger so a second identical command still expands and reapplies.
@@ -727,6 +755,8 @@ export function WidgetHomeAnimated({
     title.set('')
     detailsRef.current = null
     setEditorContent(null)
+    draft.reset()
+    setShowInsertTemplate(false)
     setError(null)
   }
 
@@ -784,13 +814,16 @@ export function WidgetHomeAnimated({
       // if the host identifies or clears the visitor while it is in flight.
       const headers = getWidgetAuthHeaders()
       const votedPostsKey = widgetQueryKeys.votedPosts.bySession(getSessionVersion())
+      // Untouched template sections are dropped; a body of only headings is
+      // sent as no body, exactly as an empty editor is.
       const details = detailsRef.current
+      const finalJson = draft.finalize(details?.json() as TiptapContent | undefined)
       const result = await widgetCreatePublicPostFn({
         data: {
           boardId: selectedBoardId,
           title: typedTitle.trim(),
-          content: (details?.html() ?? '').trim(),
-          contentJson: details?.json() as TiptapContent | undefined,
+          content: finalJson ? (details?.html() ?? '').trim() : '',
+          contentJson: finalJson ?? undefined,
           metadata: metadata ?? undefined,
         },
         headers,
@@ -941,7 +974,7 @@ export function WidgetHomeAnimated({
                   >
                     <Suspense fallback={<RichTextEditorPlaceholder minHeight="80px" />}>
                       <LazyRichTextEditor
-                        value={editorContent || ''}
+                        value={draft.editorSeed !== '' ? draft.editorSeed : editorContent || ''}
                         onDocumentChange={handleEditorChange}
                         placeholder={intl.formatMessage({
                           id: 'widget.home.input.details',
@@ -968,6 +1001,22 @@ export function WidgetHomeAnimated({
                         className="text-sm"
                       />
                     </Suspense>
+                    {showInsertTemplate && selectedBoard?.template && (
+                      <button
+                        type="button"
+                        className="mt-1 text-xs text-primary hover:underline"
+                        onClick={() => {
+                          draft.insertTemplate(selectedBoard.template!, currentDoc())
+                          setShowInsertTemplate(false)
+                        }}
+                      >
+                        <FormattedMessage
+                          id="widget.home.form.insertTemplate"
+                          defaultMessage="Insert {board} template"
+                          values={{ board: selectedBoard.name }}
+                        />
+                      </button>
+                    )}
                   </m.div>
 
                   <SimilarIdeas

@@ -35,6 +35,7 @@
   "widget.shell.goToPortal.error": "Couldn't generate sign-in link, please try again",
   "widget.home.input.placeholder": "What's your idea?",
   "widget.home.input.details": "Add more details...",
+  "widget.home.form.insertTemplate": "Insert {board} template",
   "widget.home.posting.postingTo": "Posting to",
   "widget.home.posting.postingAs": "Posting as {name}",
   "widget.home.posting.postingAnonymously": "Posting anonymously",
