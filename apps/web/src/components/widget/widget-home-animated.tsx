@@ -45,12 +45,12 @@ import type { PostId } from '@quackback/ids'
 import {
   LazyRichTextEditor,
   RichTextEditorPlaceholder,
+  usePostTemplateDraft,
 } from '@/components/ui/lazy-rich-text-editor'
 import { useWidgetMediaUpload, WidgetSessionError } from './use-widget-image-upload'
 import type { JSONContent } from '@tiptap/react'
 import type { EditorDocument } from '@/components/ui/rich-text-editor'
 import type { TiptapContent } from '@/lib/shared/schemas/posts'
-import { usePostTemplateDraft } from '@/components/shared/use-post-template-draft'
 import { readBoardTemplate, readBoardTitlePlaceholder } from '@/lib/shared/post-templates'
 import {
   composeBodyFromPlainText,

@@ -1,5 +1,4 @@
 import { useState, useCallback, useEffect, lazy, Suspense } from 'react'
-import { usePostTemplateDraft } from '@/components/shared/use-post-template-draft'
 import { readBoardTemplate } from '@/lib/shared/post-templates'
 import { useKeyboardSubmit } from '@/lib/client/hooks/use-keyboard-submit'
 import { ModalFooter } from '@/components/shared/modal-footer'
@@ -14,7 +13,7 @@ import { Dialog, DialogContent, DialogTitle, DialogTrigger } from '@/components/
 import { Button } from '@/components/ui/button'
 import { FolderIcon, TagIcon, UserIcon } from '@heroicons/react/24/outline'
 import { PencilSquareIcon } from '@heroicons/react/24/solid'
-import { LazyRichTextEditor } from '@/components/ui/lazy-rich-text-editor'
+import { LazyRichTextEditor, usePostTemplateDraft } from '@/components/ui/lazy-rich-text-editor'
 import { Skeleton } from '@/components/ui/skeleton'
 // Defer framer-motion via the public similar-posts-card lazy boundary so the
 // admin/feedback bundle no longer pulls framer-motion into the SSR bundle.

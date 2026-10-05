@@ -13,6 +13,7 @@ import {
   LazyRichTextEditor,
   RichTextEditorPlaceholder,
   preloadRichTextEditor,
+  usePostTemplateDraft,
 } from '@/components/ui/lazy-rich-text-editor'
 import { usePortalMediaUpload } from '@/lib/client/hooks/use-image-upload'
 import { useCreatePublicPost } from '@/lib/client/mutations/portal-posts'
@@ -23,7 +24,6 @@ import { useEnsureAnonSession } from '@/lib/client/hooks/use-ensure-anon-session
 import { SimilarPostsCard } from '@/components/public/similar-posts-card'
 import { BoardCustomFields } from '@/components/public/feedback/board-custom-fields'
 import { PostingToBoard } from '@/components/public/feedback/posting-to-board'
-import { usePostTemplateDraft } from '@/components/shared/use-post-template-draft'
 import { readBoardTemplate, readBoardTitlePlaceholder } from '@/lib/shared/post-templates'
 import { validatePostCustomFieldValues } from '@/lib/shared/post-custom-fields'
 import type { BoardSettings } from '@/lib/shared/db-types'
