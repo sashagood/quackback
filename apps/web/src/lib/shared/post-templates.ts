@@ -20,6 +20,7 @@ import type { TiptapContent } from '@/lib/shared/db-types'
 import {
   BOARD_TEMPLATE_HEADING_MAX_LENGTH,
   BOARD_TEMPLATE_MAX_HEADINGS,
+  BOARD_TITLE_PLACEHOLDER_MAX_LENGTH,
 } from '@/lib/shared/db-types'
 
 export const TEMPLATE_HEADING_ATTR = 'templateHeading'
@@ -149,6 +150,18 @@ export function readBoardTemplate(raw: unknown): string[] {
     if (out.length === BOARD_TEMPLATE_MAX_HEADINGS) break
   }
   return out
+}
+
+/**
+ * The board's title-field hint as stored in settings, or undefined when the
+ * value is missing, blank, over the limit, or not a string (a hand-edited
+ * settings JSON falls back to the generic hint rather than crashing).
+ */
+export function readBoardTitlePlaceholder(raw: unknown): string | undefined {
+  if (typeof raw !== 'string') return undefined
+  const t = raw.trim()
+  if (!t || t.length > BOARD_TITLE_PLACEHOLDER_MAX_LENGTH) return undefined
+  return t
 }
 
 /** One heading per non-blank line, trimmed (the settings textarea → list). */

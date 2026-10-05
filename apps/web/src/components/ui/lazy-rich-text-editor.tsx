@@ -25,6 +25,16 @@ export const LazyRichTextEditor = richTextEditor.Component
 /** Start fetching the editor ahead of the first render that needs it. */
 export const preloadRichTextEditor = richTextEditor.preload
 
+/**
+ * The draft hook that seeds the editor with a board's template. It is exported
+ * from here, the facade every composer already loads, on purpose: usage-based
+ * code splitting gives a module its own chunk whenever its set of importers is
+ * unique, so a hook imported by just the three composers became a 400-byte
+ * chunk and one more request on every page with a composer. Imported only
+ * through this facade, it ships inside this chunk instead.
+ */
+export { usePostTemplateDraft } from '@/components/shared/use-post-template-draft'
+
 /** Holds the editor's height while its chunk loads, so the layout stays put. */
 export function RichTextEditorPlaceholder({ minHeight }: { minHeight: string }) {
   return <div aria-hidden style={{ minHeight }} />

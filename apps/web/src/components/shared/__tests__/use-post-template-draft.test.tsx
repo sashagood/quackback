@@ -1,5 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, it, expect } from 'vitest'
+import { readdirSync, readFileSync, statSync } from 'node:fs'
+import { join, relative } from 'node:path'
 import { act, renderHook } from '@testing-library/react'
 import { usePostTemplateDraft } from '../use-post-template-draft'
 import { buildTemplateDoc, TEMPLATE_HEADING_ATTR } from '@/lib/shared/post-templates'
@@ -17,6 +19,31 @@ const typed: TiptapContent = {
     { type: 'paragraph', content: [{ type: 'text', text: 'It crashed' }] },
   ],
 }
+
+describe('usePostTemplateDraft module boundary', () => {
+  // Usage-based code splitting turns a module with a unique set of importers
+  // into its own chunk. This hook is loaded only through the editor facade so
+  // it ships in the chunk every composer already requests; a direct import
+  // from anywhere else would split it back out into a request of its own.
+  it('is imported only through the lazy editor facade', () => {
+    const src = join(import.meta.dirname, '..', '..', '..')
+    const importers: string[] = []
+    const walk = (dir: string) => {
+      for (const entry of readdirSync(dir)) {
+        const full = join(dir, entry)
+        if (entry === '__tests__' || entry === 'node_modules') continue
+        if (statSync(full).isDirectory()) walk(full)
+        else if (
+          /\.tsx?$/.test(entry) &&
+          readFileSync(full, 'utf-8').includes("/use-post-template-draft'")
+        )
+          importers.push(relative(src, full))
+      }
+    }
+    walk(src)
+    expect(importers.sort()).toEqual(['components/ui/lazy-rich-text-editor.tsx'])
+  })
+})
 
 describe('usePostTemplateDraft', () => {
   it('starts with an empty seed', () => {

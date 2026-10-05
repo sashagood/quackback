@@ -423,6 +423,9 @@ async function measureBrowser(
       quiet,
       metrics,
       byComponent,
+      // Every script the journey fetched, so a request-count regression can
+      // be read as "which chunk is new" instead of a bare number (--trace).
+      scripts: scripts.map((r) => r.name.replace(/^.*\/assets\//, '')).sort(),
       timing: {
         doneMs,
         serverMs: work.serverMs,
@@ -623,15 +626,21 @@ async function main() {
     const runs: Record<string, Metrics[]> = {}
     const timings: Record<string, Record<string, number>[]> = {}
     const errors: Record<string, string> = {}
+    const scriptsByJourney: Record<string, string[]> = {}
     for (let r = 0; r < repeat; r++) {
       for (const journey of selected) {
         try {
           const result = await measure(journey, true)
           ;(runs[journey.name] ??= []).push(result.metrics)
+          if (r === 0 && 'scripts' in result) scriptsByJourney[journey.name] = result.scripts
           if ('quiet' in result && !result.quiet) errors[journey.name] = 'network never went quiet'
           if (args.trace && r === 0) {
             console.log(`\n  ${journey.name}: ${result.metrics.dbQueries} queries`)
             printTrace(result.id)
+            if ('scripts' in result) {
+              console.log(`\n  ${journey.name}: ${result.scripts.length} scripts`)
+              for (const name of result.scripts) console.log(`    ${name}`)
+            }
           }
           if (args.renders && r === 0 && 'byComponent' in result) {
             console.log(`\n  ${journey.name}: ${result.metrics.componentRenders} component renders`)
@@ -660,6 +669,7 @@ async function main() {
         unstable: string[]
         peaks: Metrics
         timing?: Record<string, number>
+        scripts?: string[]
       }
     > = {}
     console.log('')
@@ -684,7 +694,13 @@ async function main() {
         timing[`${key}.p50`] = Math.round(percentile(values, 50))
         timing[`${key}.p90`] = Math.round(percentile(values, 90))
       }
-      results[name] = { metrics, unstable, peaks, timing: timingRuns ? timing : undefined }
+      results[name] = {
+        metrics,
+        unstable,
+        peaks,
+        timing: timingRuns ? timing : undefined,
+        scripts: scriptsByJourney[name],
+      }
 
       const rows = compare(budgets, name, metrics)
       const over = rows.filter((row) => row.verdict === 'over')
@@ -709,6 +725,16 @@ async function main() {
       const coldQueries = coldMetrics[name]?.dbQueries
       if (coldQueries !== undefined && coldQueries !== metrics.dbQueries) {
         console.log(`    cold: dbQueries=${coldQueries}`)
+      }
+      // A request count over its ceiling is only actionable as a chunk name:
+      // list what was fetched so the new one can be spotted against the
+      // previous run's list (also kept in latest.json for the artifact).
+      const requestsOver = over.some(
+        (row) => row.metric === 'requests' || row.metric === 'jsRequests'
+      )
+      if (requestsOver && scriptsByJourney[name]) {
+        console.log(`    scripts (${scriptsByJourney[name].length}):`)
+        for (const script of scriptsByJourney[name]) console.log(`      ${script}`)
       }
       if (process.env.GITHUB_ACTIONS === 'true') {
         for (const row of rows) {

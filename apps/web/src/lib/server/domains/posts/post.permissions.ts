@@ -6,7 +6,17 @@
  * live in post.user-actions.ts.
  */
 
-import { db, posts, postComments, eq, and, sql, isNull } from '@/lib/server/db'
+import {
+  db,
+  posts,
+  postComments,
+  postActivity,
+  principal,
+  eq,
+  and,
+  sql,
+  isNull,
+} from '@/lib/server/db'
 import { toUuid, type PostId, type PrincipalId, type PostStatusId } from '@quackback/ids'
 import { getExecuteRows } from '@/lib/server/utils'
 import { NotFoundError } from '@/lib/shared/errors'
@@ -66,14 +76,13 @@ export async function canEditPost(
   // Get portal config if not provided
   const config = portalConfig ?? (await getPortalConfig())
 
-  // Check if status is default (Open)
-  const isDefault = await isDefaultStatus(post.statusId)
-  if (!isDefault && !config.features.allowEditAfterEngagement) {
-    return { allowed: false, reason: 'Cannot edit posts that have been reviewed by the team' }
-  }
-
-  // Check for engagement (votes, comments from others)
   if (!config.features.allowEditAfterEngagement) {
+    // A team member moved the post off the default status from inside Quackback.
+    if (await reviewedByTeam(postId, await isDefaultStatus(post.statusId))) {
+      return { allowed: false, reason: 'Cannot edit posts that have been reviewed by the team' }
+    }
+
+    // Check for engagement (votes, comments from others)
     if (post.voteCount > 0 && (await hasVotesFromOtherUsers(postId, actor.principalId))) {
       return {
         allowed: false,
@@ -137,17 +146,16 @@ export async function canDeletePost(
   // Get portal config if not provided
   const config = portalConfig ?? (await getPortalConfig())
 
-  // Check if status is default (Open)
-  const isDefault = await isDefaultStatus(post.statusId)
-  if (!isDefault && !config.features.allowDeleteAfterEngagement) {
-    return {
-      allowed: false,
-      reason: 'Cannot delete posts that have been reviewed by the team',
-    }
-  }
-
-  // Check for engagement (votes, comments)
   if (!config.features.allowDeleteAfterEngagement) {
+    // A team member moved the post off the default status from inside Quackback.
+    if (await reviewedByTeam(postId, await isDefaultStatus(post.statusId))) {
+      return {
+        allowed: false,
+        reason: 'Cannot delete posts that have been reviewed by the team',
+      }
+    }
+
+    // Check for engagement (votes, comments)
     if (post.voteCount > 0) {
       return { allowed: false, reason: 'Cannot delete posts that have received votes' }
     }
@@ -226,13 +234,18 @@ export async function getPostPermissions(
   let canEdit: PermissionCheckResult = { allowed: true }
   let canDelete: PermissionCheckResult = { allowed: true }
 
+  // One lookup serves both checks; skipped when neither rule is in force.
+  const reviewed =
+    (!config.features.allowEditAfterEngagement || !config.features.allowDeleteAfterEngagement) &&
+    (await reviewedByTeam(postId, isDefault))
+
   // Status check for edit
-  if (!isDefault && !config.features.allowEditAfterEngagement) {
+  if (reviewed && !config.features.allowEditAfterEngagement) {
     canEdit = { allowed: false, reason: 'Cannot edit posts that have been reviewed by the team' }
   }
 
   // Status check for delete
-  if (!isDefault && !config.features.allowDeleteAfterEngagement) {
+  if (reviewed && !config.features.allowDeleteAfterEngagement) {
     canDelete = {
       allowed: false,
       reason: 'Cannot delete posts that have been reviewed by the team',
@@ -303,6 +316,31 @@ async function isDefaultStatus(statusId: PostStatusId | null): Promise<boolean> 
 }
 
 /**
+ * "Reviewed by the team" means a team member moved the post off the default
+ * status from inside Quackback. A status that an integration mirrored in (the
+ * Linear issue landing in Triage seconds after creation, or the team moving
+ * it in Linear) is recorded under the integration's service principal and is
+ * not a review: before inbound status sync existed, those moves never reached
+ * the post, and authors kept their edit window (PRO-573). The default status
+ * short-circuits without a query.
+ */
+async function reviewedByTeam(postId: PostId, isDefault: boolean): Promise<boolean> {
+  if (isDefault) return false
+
+  const result = await db.execute(sql`
+    SELECT 1 AS reviewed
+    FROM ${postActivity}
+    JOIN ${principal} ON ${principal.id} = ${postActivity.principalId}
+    WHERE ${postActivity.postId} = ${toUuid(postId)}::uuid
+      AND ${postActivity.type} = 'status.changed'
+      AND ${principal.type} <> 'service'
+    LIMIT 1
+  `)
+  const row = getExecuteRows<{ reviewed: number }>(result)[0]
+  return Number(row?.reviewed ?? 0) > 0
+}
+
+/**
  * Check if a post has comments from users other than the author
  */
 async function hasCommentsFromOthers(
@@ -311,11 +349,14 @@ async function hasCommentsFromOthers(
 ): Promise<boolean> {
   if (!authorPrincipalId) return false // Anonymous author can't have "other" comments
 
-  // Find any comment not from the author and not deleted (LIMIT 1 is faster than COUNT)
+  // Find any comment not from the author and not deleted (LIMIT 1 is faster than COUNT).
+  // A raw sql`` parameter bypasses the typeid column mapping, so the principal
+  // id must be converted by hand (it reached Postgres as 'principal_…' and
+  // failed with "invalid input syntax for type uuid" on every author edit).
   const otherComment = await db.query.postComments.findFirst({
     where: and(
       eq(postComments.postId, postId),
-      sql`${postComments.principalId} != ${authorPrincipalId}`,
+      sql`${postComments.principalId} != ${toUuid(authorPrincipalId)}::uuid`,
       isNull(postComments.deletedAt)
     ),
   })

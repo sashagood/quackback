@@ -24,8 +24,10 @@ import { createActivity } from '@/lib/server/domains/activity/activity.service'
 import {
   dispatchPostDeleted,
   dispatchPostRestored,
+  dispatchPostUpdated,
   buildEventActor,
 } from '@/lib/server/events/dispatch'
+import { canEditPost } from './post.permissions'
 import { DEFAULT_PORTAL_CONFIG, type PortalConfig } from '@/lib/server/domains/settings'
 import type { UserEditPostInput } from './post.types'
 import { markdownToTiptapJson } from '@/lib/server/markdown-tiptap'
@@ -33,7 +35,6 @@ import { contentHoldReason } from '@/lib/server/content/content-holds'
 import { recordAuditEvent } from '@/lib/server/audit/log'
 import { logger } from '@/lib/server/logger'
 import { recalculateCanonicalVoteCount } from './post.merge-ids'
-import { hasVotesFromOtherUsers } from './post.engagement'
 
 const log = logger.child({ component: 'post-user-actions' })
 
@@ -67,23 +68,6 @@ async function getPortalConfig(): Promise<PortalConfig> {
       ...(config?.moderationDefault ?? {}),
     },
   }
-}
-
-async function hasCommentsFromOthers(
-  postId: PostId,
-  authorPrincipalId: PrincipalId | null | undefined
-): Promise<boolean> {
-  if (!authorPrincipalId) return false
-
-  const otherComment = await db.query.postComments.findFirst({
-    where: and(
-      eq(postComments.postId, postId),
-      sql`${postComments.principalId} != ${authorPrincipalId}`,
-      isNull(postComments.deletedAt)
-    ),
-  })
-
-  return !!otherComment
 }
 
 async function getCommentCount(postId: PostId): Promise<number> {
@@ -150,30 +134,12 @@ export async function userEditPost(
       throw new ForbiddenError('EDIT_NOT_ALLOWED', 'You can only edit your own posts')
     }
 
-    // Check engagement restrictions for regular users
-    if (!config.features.allowEditAfterEngagement) {
-      // Status is default if no statusId or the status has isDefault=true
-      const isDefault = !existingPost.statusId || existingPost.postStatus?.isDefault === true
-      if (!isDefault) {
-        throw new ForbiddenError(
-          'EDIT_NOT_ALLOWED',
-          'Cannot edit posts that have been reviewed by the team'
-        )
-      }
-      if (existingPost.voteCount > 0 && (await hasVotesFromOtherUsers(postId, actor.principalId))) {
-        throw new ForbiddenError(
-          'EDIT_NOT_ALLOWED',
-          'Cannot edit posts that have received votes from other users'
-        )
-      }
-      // Check for comments from others
-      const hasOtherComments = await hasCommentsFromOthers(postId, actor.principalId)
-      if (hasOtherComments) {
-        throw new ForbiddenError(
-          'EDIT_NOT_ALLOWED',
-          'Cannot edit posts that have comments from other users'
-        )
-      }
+    // One rule decides both the Edit button and the save (post.permissions.ts):
+    // team review of the status, other people's votes, other people's comments.
+    // This used to be a second copy of those checks, which drifted (PRO-573).
+    const verdict = await canEditPost(postId, actor, config)
+    if (!verdict.allowed) {
+      throw new ForbiddenError('EDIT_NOT_ALLOWED', verdict.reason ?? 'Cannot edit this post')
     }
   }
 
@@ -225,6 +191,23 @@ export async function userEditPost(
       after: { moderationState: 'pending' },
       metadata: { reason: holdReason, previouslyPublished: true },
     })
+  }
+
+  // Announce the edit so integrations refresh the linked issue (the admin
+  // edit path already did; the author path did not, so Linear kept the old
+  // text). A post re-held for moderation announces nothing until published.
+  const changedFields: string[] = []
+  if (updatedPost.title !== existingPost.title) changedFields.push('title')
+  if (updatedPost.content !== existingPost.content) changedFields.push('content')
+  if (changedFields.length > 0 && !rehold) {
+    const board = await db.query.boards.findFirst({ where: eq(boards.id, updatedPost.boardId) })
+    if (board) {
+      await dispatchPostUpdated(
+        buildEventActor({ principalId: actor.principalId }),
+        { id: postId, title: updatedPost.title, boardId: board.id, boardSlug: board.slug },
+        changedFields
+      )
+    }
   }
 
   // Regenerate embedding (and cascade to merge check) after user edit

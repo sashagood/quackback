@@ -86,6 +86,8 @@ export interface BoardSettings {
   customFields?: BoardCustomField[] // Extra intake fields the submission form renders
   /** H2 question headings prefilled into a new post's body (PRO-529). Absent or empty = none. */
   template?: string[]
+  /** Placeholder for the post title field on this board; absent = the generic portal hint. */
+  titlePlaceholder?: string
 }
 
 /** The input controls a board custom field can render as on the public
@@ -120,6 +122,7 @@ export type CustomFieldValues = Record<string, string | number | boolean>
 /** Limits for boards.settings.template (shared by the editor, the form, and the server). */
 export const BOARD_TEMPLATE_MAX_HEADINGS = 8
 export const BOARD_TEMPLATE_HEADING_MAX_LENGTH = 120
+export const BOARD_TITLE_PLACEHOLDER_MAX_LENGTH = 80
 
 // ----------------------------------------------------------------------
 // Per-action access tiers (View+Vote / Comment / Submit) and per-board

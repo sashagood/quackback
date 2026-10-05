@@ -31,7 +31,10 @@ vi.mock('@/lib/client/hooks/use-image-upload', () => ({
 vi.mock('@/components/public/similar-posts-card', () => ({ SimilarPostsCard: () => null }))
 vi.mock('@/components/shared/author-selector', () => ({ AuthorSelector: () => null }))
 vi.mock('@/components/ui/select', async () => import('@/test/radix-select'))
-vi.mock('@/components/ui/lazy-rich-text-editor', () => ({
+vi.mock('@/components/ui/lazy-rich-text-editor', async () => ({
+  // The facade re-exports the real draft hook; only the editor is stubbed.
+  usePostTemplateDraft: (await import('@/components/shared/use-post-template-draft'))
+    .usePostTemplateDraft,
   LazyRichTextEditor: (props: { value?: unknown }) => {
     editor.values.push(props.value)
     return <div data-testid="editor" />

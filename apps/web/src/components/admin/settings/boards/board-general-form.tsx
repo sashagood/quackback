@@ -5,11 +5,13 @@ import { updateBoardSchema, type UpdateBoardInput } from '@/lib/shared/schemas/b
 import {
   parseTemplateText,
   readBoardTemplate,
+  readBoardTitlePlaceholder,
   validateBoardTemplate,
 } from '@/lib/shared/post-templates'
 import {
   BOARD_TEMPLATE_HEADING_MAX_LENGTH,
   BOARD_TEMPLATE_MAX_HEADINGS,
+  BOARD_TITLE_PLACEHOLDER_MAX_LENGTH,
   type BoardSettings,
 } from '@/lib/shared/db-types'
 import { Input } from '@/components/ui/input'
@@ -53,6 +55,7 @@ export function BoardGeneralForm({ board }: BoardGeneralFormProps) {
       description: board.description || '',
       // readBoardTemplate: a hand-edited settings JSON must not crash the page.
       templateText: readBoardTemplate(board.settings?.template).join('\n'),
+      titlePlaceholder: readBoardTitlePlaceholder(board.settings?.titlePlaceholder) ?? '',
     },
   })
 
@@ -71,7 +74,12 @@ export function BoardGeneralForm({ board }: BoardGeneralFormProps) {
         id: board.id,
         name: data.name,
         description: data.description,
-        settings: { template: parsed.value },
+        // An empty placeholder is sent as '' (not omitted) so the server
+        // clears the stored hint back to the generic one.
+        settings: {
+          template: parsed.value,
+          titlePlaceholder: (data.titlePlaceholder ?? '').trim(),
+        },
       },
       {
         onSuccess: (updated) => {
@@ -116,6 +124,28 @@ export function BoardGeneralForm({ board }: BoardGeneralFormProps) {
               <FormControl>
                 <Textarea rows={3} {...field} />
               </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+
+        <FormField
+          control={form.control}
+          name="titlePlaceholder"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Title placeholder</FormLabel>
+              <FormControl>
+                <Input
+                  placeholder="What's your idea?"
+                  maxLength={BOARD_TITLE_PLACEHOLDER_MAX_LENGTH}
+                  {...field}
+                />
+              </FormControl>
+              <p className="text-xs text-muted-foreground">
+                Hint shown in the empty title field when this board is selected, up to{' '}
+                {BOARD_TITLE_PLACEHOLDER_MAX_LENGTH} characters. Leave empty for the default.
+              </p>
               <FormMessage />
             </FormItem>
           )}

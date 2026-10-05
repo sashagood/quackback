@@ -6,9 +6,10 @@
  * - restorePost: 30-day restore window, validation
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { createId, type PostId, type PrincipalId } from '@quackback/ids'
+import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest'
+import { createId, type PostId, type PostStatusId, type PrincipalId } from '@quackback/ids'
 import { DEFAULT_PORTAL_CONFIG } from '@/lib/server/domains/settings'
+import { db } from '@/lib/server/db'
 
 // --- Mock tracking ---
 
@@ -76,7 +77,10 @@ vi.mock('@/lib/server/domains/activity/activity.service', () => ({
   createActivity: vi.fn(),
 }))
 
+const { dispatchPostUpdated } = vi.hoisted(() => ({ dispatchPostUpdated: vi.fn() }))
+
 vi.mock('@/lib/server/events/dispatch', () => ({
+  dispatchPostUpdated,
   dispatchPostDeleted: vi.fn(),
   dispatchPostRestored: vi.fn(),
   buildEventActor: vi.fn((actor) => actor),
@@ -157,8 +161,57 @@ describe('post.permissions', () => {
       })
     })
 
+    // PRO-573: inbound integration sync mirrors Linear's state onto the post
+    // (a new issue lands in Triage within seconds). That move is written by
+    // the integration's service principal and is not a team review, so it
+    // must not close the author's edit window.
+    const mirroredPost = {
+      ...authoredPost,
+      statusId: createId('post_status') as PostStatusId,
+      postStatus: { isDefault: false },
+    }
+
+    function statusIsNotDefault() {
+      ;(db.query.postStatuses.findFirst as unknown as Mock).mockResolvedValueOnce(null)
+    }
+
+    it('keeps an author editing when an integration mirrored a non-default status', async () => {
+      mockFindFirst.mockResolvedValueOnce(mirroredPost)
+      statusIsNotDefault()
+      mockPostVoteFindFirst.mockResolvedValueOnce(null)
+      const { canEditPost } = await import('../post.permissions')
+
+      await expect(canEditPost(EDIT_POST_ID, EDIT_AUTHOR, DEFAULT_PORTAL_CONFIG)).resolves.toEqual({
+        allowed: true,
+      })
+    })
+
+    it('still locks an author once a team member changed the status in Quackback', async () => {
+      mockFindFirst.mockResolvedValueOnce(mirroredPost)
+      statusIsNotDefault()
+      ;(db.execute as unknown as Mock).mockResolvedValueOnce([{ reviewed: 1 }])
+      const { canEditPost } = await import('../post.permissions')
+
+      await expect(canEditPost(EDIT_POST_ID, EDIT_AUTHOR, DEFAULT_PORTAL_CONFIG)).resolves.toEqual({
+        allowed: false,
+        reason: 'Cannot edit posts that have been reviewed by the team',
+      })
+    })
+
+    it('reports a mirrored-status post as editable to the portal', async () => {
+      mockFindFirst.mockResolvedValueOnce(mirroredPost)
+      mockPostVoteFindFirst.mockResolvedValueOnce(null)
+      const { getPostPermissions } = await import('../post.permissions')
+
+      await expect(getPostPermissions(EDIT_POST_ID, EDIT_AUTHOR)).resolves.toEqual({
+        canEdit: { allowed: true },
+        canDelete: { allowed: false, reason: 'Cannot delete posts that have received votes' },
+      })
+    })
+
     it('enforces the same self-vote rule in the edit mutation', async () => {
-      mockFindFirst.mockResolvedValueOnce(authoredPost)
+      // The mutation loads the post, then the shared permission check loads it again.
+      mockFindFirst.mockResolvedValueOnce(authoredPost).mockResolvedValueOnce(authoredPost)
       mockPostVoteFindFirst.mockResolvedValueOnce(null)
       const { userEditPost } = await import('../post.user-actions')
 
@@ -169,6 +222,55 @@ describe('post.permissions', () => {
           EDIT_AUTHOR
         )
       ).resolves.toBeDefined()
+    })
+
+    it('lets the author save when an integration mirrored a non-default status', async () => {
+      mockFindFirst.mockResolvedValueOnce(mirroredPost).mockResolvedValueOnce(mirroredPost)
+      statusIsNotDefault()
+      mockPostVoteFindFirst.mockResolvedValueOnce(null)
+      const { userEditPost } = await import('../post.user-actions')
+
+      await expect(
+        userEditPost(
+          EDIT_POST_ID,
+          { title: 'Updated title', content: 'Updated content' },
+          EDIT_AUTHOR
+        )
+      ).resolves.toBeDefined()
+    })
+
+    it('rejects the save with the shared reason once the team changed the status', async () => {
+      mockFindFirst.mockResolvedValueOnce(mirroredPost).mockResolvedValueOnce(mirroredPost)
+      statusIsNotDefault()
+      ;(db.execute as unknown as Mock).mockResolvedValueOnce([{ reviewed: 1 }])
+      const { userEditPost } = await import('../post.user-actions')
+
+      await expect(
+        userEditPost(
+          EDIT_POST_ID,
+          { title: 'Updated title', content: 'Updated content' },
+          EDIT_AUTHOR
+        )
+      ).rejects.toThrow('Cannot edit posts that have been reviewed by the team')
+    })
+
+    // The Linear integration refreshes the linked issue on post.updated; the
+    // admin edit path emitted it, the author edit path did not.
+    it('announces the edit as post.updated so the linked Linear issue refreshes', async () => {
+      mockFindFirst.mockResolvedValueOnce(authoredPost).mockResolvedValueOnce(authoredPost)
+      mockPostVoteFindFirst.mockResolvedValueOnce(null)
+      const { userEditPost } = await import('../post.user-actions')
+
+      await userEditPost(
+        EDIT_POST_ID,
+        { title: 'Updated title', content: 'Updated content' },
+        EDIT_AUTHOR
+      )
+
+      expect(dispatchPostUpdated).toHaveBeenCalledTimes(1)
+      const [, post, changedFields] = dispatchPostUpdated.mock.calls[0]!
+      expect(post).toMatchObject({ id: EDIT_POST_ID })
+      expect(changedFields).toEqual(['title', 'content'])
     })
   })
 

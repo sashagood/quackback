@@ -94,6 +94,28 @@ describe('<BoardGeneralForm> post template', () => {
     })
   })
 
+  it('saves a trimmed title placeholder and clears it when emptied', async () => {
+    render(<BoardGeneralForm board={{ ...board, settings: { titlePlaceholder: 'Old hint' } }} />)
+    const field = screen.getByLabelText('Title placeholder') as HTMLInputElement
+    expect(field.value).toBe('Old hint')
+    fireEvent.change(field, { target: { value: '  What went wrong, in one line?  ' } })
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+    })
+    expect(mutate.mock.calls[0]![0]).toMatchObject({
+      settings: { titlePlaceholder: 'What went wrong, in one line?' },
+    })
+
+    mutate.mockReset()
+    fireEvent.change(field, { target: { value: '' } })
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+    })
+    // Sent as '' (not omitted): JSON drops undefined, and the server clears on ''.
+    const sent = mutate.mock.calls[0]![0] as { settings: Record<string, unknown> }
+    expect(sent.settings.titlePlaceholder).toBe('')
+  })
+
   it('renders a malformed stored template as empty instead of crashing', () => {
     render(
       <BoardGeneralForm

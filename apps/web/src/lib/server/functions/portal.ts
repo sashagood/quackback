@@ -24,7 +24,7 @@ import { isTeamMember } from '@/lib/shared/roles'
 import { can } from '@/lib/server/policy/authorize'
 import { PERMISSIONS } from '@/lib/shared/permissions'
 import { PageLimitMinOneSchema } from '@/lib/shared/schemas/taxonomy'
-import { readBoardTemplate } from '@/lib/shared/post-templates'
+import { readBoardTemplate, readBoardTitlePlaceholder } from '@/lib/shared/post-templates'
 import {
   fetchPublicPostDetailSchema,
   type FetchPublicPostDetailInput,
@@ -808,6 +808,7 @@ export const runFetchBoardCapabilities = createServerOnlyFn(
         name: board.name,
         slug: board.slug,
         ...templateProp((board.settings as BoardSettings | null)?.template),
+        ...titlePlaceholderProp((board.settings as BoardSettings | null)?.titlePlaceholder),
       })),
     }
   }
@@ -820,12 +821,24 @@ export const fetchBoardCapabilitiesFn = createServerFn({ method: 'GET' }).handle
   return runFetchBoardCapabilities(await getOptionalAuth())
 })
 
-export type WidgetVisibleBoard = { id: string; name: string; slug: string; template?: string[] }
+export type WidgetVisibleBoard = {
+  id: string
+  name: string
+  slug: string
+  template?: string[]
+  titlePlaceholder?: string
+}
 
 /** The widget's board template, present only when the stored value reads as a template. */
 function templateProp(raw: unknown): { template?: string[] } {
   const template = readBoardTemplate(raw)
   return template.length > 0 ? { template } : {}
+}
+
+/** The board's title hint, present only when the stored value is a non-empty string. */
+function titlePlaceholderProp(raw: unknown): { titlePlaceholder?: string } {
+  const titlePlaceholder = readBoardTitlePlaceholder(raw)
+  return titlePlaceholder ? { titlePlaceholder } : {}
 }
 
 // The first page of several columns of one board, under the same filters.

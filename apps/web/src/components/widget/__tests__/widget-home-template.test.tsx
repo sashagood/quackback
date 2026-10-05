@@ -92,6 +92,7 @@ const bugs = {
   name: 'Bugs',
   slug: 'bugs',
   template: ['What went wrong?', 'What should happen?'],
+  titlePlaceholder: 'What went wrong, in one line?',
 }
 
 function wrapper({ children }: { children: ReactNode }) {
@@ -143,6 +144,18 @@ afterEach(() => {
   cleanup()
   editor.values = []
   vi.unstubAllGlobals()
+})
+
+describe('widget composer board title placeholder', () => {
+  it('uses the selected board hint, or the generic one when the board has none', () => {
+    renderHome()
+    const title = screen.getByRole('textbox', { name: 'Feedback title' }) as HTMLInputElement
+    expect(title.placeholder).toBe('What went wrong, in one line?')
+    cleanup()
+    renderHome({ boards: [{ id: 'board_gen', name: 'General', slug: 'general' }] })
+    const generic = screen.getByRole('textbox', { name: 'Feedback title' }) as HTMLInputElement
+    expect(generic.placeholder).toBe("What's your idea?")
+  })
 })
 
 describe('widget composer board template', () => {

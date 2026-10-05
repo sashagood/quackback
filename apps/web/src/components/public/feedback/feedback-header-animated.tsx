@@ -13,6 +13,7 @@ import {
   LazyRichTextEditor,
   RichTextEditorPlaceholder,
   preloadRichTextEditor,
+  usePostTemplateDraft,
 } from '@/components/ui/lazy-rich-text-editor'
 import { usePortalMediaUpload } from '@/lib/client/hooks/use-image-upload'
 import { useCreatePublicPost } from '@/lib/client/mutations/portal-posts'
@@ -23,8 +24,7 @@ import { useEnsureAnonSession } from '@/lib/client/hooks/use-ensure-anon-session
 import { SimilarPostsCard } from '@/components/public/similar-posts-card'
 import { BoardCustomFields } from '@/components/public/feedback/board-custom-fields'
 import { PostingToBoard } from '@/components/public/feedback/posting-to-board'
-import { usePostTemplateDraft } from '@/components/shared/use-post-template-draft'
-import { readBoardTemplate } from '@/lib/shared/post-templates'
+import { readBoardTemplate, readBoardTitlePlaceholder } from '@/lib/shared/post-templates'
 import { validatePostCustomFieldValues } from '@/lib/shared/post-custom-fields'
 import type { BoardSettings } from '@/lib/shared/db-types'
 import { signOut } from '@/lib/client/auth-client'
@@ -54,11 +54,6 @@ export interface FeedbackHeaderProps {
    */
   boardPermissions?: Record<string, { canSubmit: boolean; canVote: boolean }>
   onPostCreated?: (postId: string, boardSlug: string) => void
-  /**
-   * When true, posts go to this page's board and the form does not offer a
-   * board switcher.
-   */
-  boardLocked?: boolean
 }
 
 export function FeedbackHeaderAnimated({
@@ -67,7 +62,6 @@ export function FeedbackHeaderAnimated({
   user,
   boardPermissions,
   onPostCreated,
-  boardLocked = false,
 }: FeedbackHeaderProps) {
   const intl = useIntl()
   const router = useRouter()
@@ -318,7 +312,6 @@ export function FeedbackHeaderAnimated({
             <PostingToBoard
               boards={boards}
               selectedBoardId={selectedBoardId}
-              locked={boardLocked}
               onSelect={(id) => {
                 setSelectedBoardId(id)
                 // Answers are per-board: switching boards drops the previous
@@ -357,6 +350,7 @@ export function FeedbackHeaderAnimated({
           title={title}
           inputRef={titleInputRef}
           expanded={expanded}
+          placeholder={readBoardTitlePlaceholder(selectedBoard?.settings?.titlePlaceholder)}
           onExpand={() => setExpanded(true)}
         />
       </div>
@@ -573,11 +567,14 @@ function TitleInput({
   title,
   inputRef,
   expanded,
+  placeholder,
   onExpand,
 }: {
   title: TitleStore
   inputRef: RefObject<HTMLInputElement | null>
   expanded: boolean
+  /** Per-board hint from the admin's board settings; the generic string when absent. */
+  placeholder?: string
   onExpand: () => void
 }) {
   const intl = useIntl()
@@ -586,10 +583,13 @@ function TitleInput({
     <motion.input
       ref={inputRef}
       type="text"
-      placeholder={intl.formatMessage({
-        id: 'portal.feedback.header.titlePlaceholder',
-        defaultMessage: "What's your idea?",
-      })}
+      placeholder={
+        placeholder ??
+        intl.formatMessage({
+          id: 'portal.feedback.header.titlePlaceholder',
+          defaultMessage: "What's your idea?",
+        })
+      }
       value={value}
       aria-label={intl.formatMessage({
         id: 'portal.feedback.header.titleLabel',
