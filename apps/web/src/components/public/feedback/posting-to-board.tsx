@@ -15,15 +15,18 @@ interface BoardOption {
   settings?: BoardSettings
 }
 
+/**
+ * The composer's destination board. Always a switcher: a board page
+ * preselects its board, but the author can still post elsewhere (PRO-540:
+ * the static label shown on board pages read as a broken dropdown).
+ */
 export function PostingToBoard({
   boards,
   selectedBoardId,
-  locked,
   onSelect,
 }: {
   boards: BoardOption[]
   selectedBoardId: string
-  locked: boolean
   onSelect: (id: string) => void
 }) {
   const intl = useIntl()
@@ -43,30 +46,26 @@ export function PostingToBoard({
       <span className="text-xs text-muted-foreground me-1">
         <FormattedMessage id="portal.feedback.header.postingTo" defaultMessage="Posting to" />
       </span>
-      {locked ? (
-        <span className="text-xs font-medium text-foreground">{selectedBoard?.name}</span>
-      ) : (
-        <Select value={selectedBoardId} onValueChange={onSelect}>
-          <SelectTrigger
-            size="xs"
-            className="border-0 bg-transparent shadow-none font-medium text-foreground hover:text-foreground/80 focus-visible:ring-0"
-          >
-            <SelectValue
-              placeholder={intl.formatMessage({
-                id: 'portal.feedback.header.selectBoard',
-                defaultMessage: 'Select a board',
-              })}
-            />
-          </SelectTrigger>
-          <SelectContent align="start">
-            {boards.map((board) => (
-              <SelectItem key={board.id} value={board.id} className="py-1">
-                {board.name}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      )}
+      <Select value={selectedBoardId} onValueChange={onSelect}>
+        <SelectTrigger
+          size="xs"
+          className="border-0 bg-transparent shadow-none font-medium text-foreground hover:text-foreground/80 focus-visible:ring-0"
+        >
+          <SelectValue
+            placeholder={intl.formatMessage({
+              id: 'portal.feedback.header.selectBoard',
+              defaultMessage: 'Select a board',
+            })}
+          />
+        </SelectTrigger>
+        <SelectContent align="start">
+          {boards.map((board) => (
+            <SelectItem key={board.id} value={board.id} className="py-1">
+              {board.name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
     </div>
   )
 }

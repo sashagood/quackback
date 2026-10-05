@@ -11,32 +11,30 @@ const boards = [
   { id: 'board_2', name: 'Bug Reports', slug: 'bugs' },
 ]
 
-function renderRow(locked: boolean) {
+function renderRow() {
   const onSelect = vi.fn()
   const result = render(
     <IntlProvider locale="en" defaultLocale="en">
-      <PostingToBoard
-        boards={boards}
-        selectedBoardId="board_1"
-        locked={locked}
-        onSelect={onSelect}
-      />
+      <PostingToBoard boards={boards} selectedBoardId="board_1" onSelect={onSelect} />
     </IntlProvider>
   )
   return { onSelect, ...result }
 }
 
 describe('PostingToBoard', () => {
-  it('renders a board switcher when the board is not locked', () => {
-    renderRow(false)
+  it('renders a board switcher with the page board preselected', () => {
+    renderRow()
     expect(screen.getByLabelText('Posting to Feature Requests')).toBeInTheDocument()
     expect(screen.getByRole('combobox')).toHaveValue('board_1')
   })
 
-  it('renders a static board name when the board is locked', () => {
-    renderRow(true)
-    expect(screen.getByLabelText('Posting to Feature Requests')).toBeInTheDocument()
-    expect(screen.getByText('Feature Requests')).toBeInTheDocument()
-    expect(screen.queryByRole('combobox')).not.toBeInTheDocument()
+  // PRO-540: there is no locked mode. On a board page the composer used to
+  // render the board as a static label, which readers took for a dropdown
+  // that "sometimes" does not open.
+  it('has no locked mode: every board stays selectable', () => {
+    renderRow()
+    expect(screen.getByRole('option', { name: 'Bug Reports' })).toBeInTheDocument()
+    expect(PostingToBoard.length).toBe(1)
+    expect(screen.queryByText('Feature Requests', { selector: 'span' })).not.toBeInTheDocument()
   })
 })

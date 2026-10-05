@@ -54,11 +54,6 @@ export interface FeedbackHeaderProps {
    */
   boardPermissions?: Record<string, { canSubmit: boolean; canVote: boolean }>
   onPostCreated?: (postId: string, boardSlug: string) => void
-  /**
-   * When true, posts go to this page's board and the form does not offer a
-   * board switcher.
-   */
-  boardLocked?: boolean
 }
 
 export function FeedbackHeaderAnimated({
@@ -67,7 +62,6 @@ export function FeedbackHeaderAnimated({
   user,
   boardPermissions,
   onPostCreated,
-  boardLocked = false,
 }: FeedbackHeaderProps) {
   const intl = useIntl()
   const router = useRouter()
@@ -318,7 +312,6 @@ export function FeedbackHeaderAnimated({
             <PostingToBoard
               boards={boards}
               selectedBoardId={selectedBoardId}
-              locked={boardLocked}
               onSelect={(id) => {
                 setSelectedBoardId(id)
                 // Answers are per-board: switching boards drops the previous

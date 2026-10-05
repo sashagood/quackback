@@ -241,7 +241,8 @@ export function FeedbackContainer({
   const currentBoardInfo = activeBoard ? boards.find((b) => b.slug === activeBoard) : boards[0]
   const boardIdForCreate = currentBoardInfo?.id || defaultBoardId
   // A selected board is page context (sidebar / ?board=), not a filter the
-  // submit form or chip row should switch away from.
+  // chip row should switch away from. The composer only preselects it: the
+  // author may still post to another board (PRO-540).
   const boardLocked = Boolean(activeBoard)
 
   function handlePostCreated(postId: string): void {
@@ -334,7 +335,6 @@ export function FeedbackContainer({
             user={effectiveUser}
             boardPermissions={boardPermissions}
             onPostCreated={handlePostCreated}
-            boardLocked={boardLocked}
           />
 
           <FeedbackToolbar
