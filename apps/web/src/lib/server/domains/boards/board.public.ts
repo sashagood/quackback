@@ -1,4 +1,4 @@
-import { db, eq, and, isNull, sql, boards, posts, type Board } from '@/lib/server/db'
+import { db, eq, and, isNull, sql, boards, posts, postStatuses, type Board } from '@/lib/server/db'
 import { getTableColumns } from 'drizzle-orm'
 import type { BoardId } from '@quackback/ids'
 import { InternalError } from '@/lib/shared/errors'
@@ -61,6 +61,10 @@ export async function listPublicBoardsWithStats(
     // The post-count join must apply postViewFilter, not just isNull(deletedAt) —
     // otherwise the count leaks pending/spam/archived posts to non-team users
     // and disagrees with what the actual post list shows them.
+    //
+    // The sidebar counter is "open work", not a lifetime total (PRO-530): a
+    // post counts while it has no status or its status is in the `active`
+    // category; `complete` and `closed` (done, duplicate, snoozed, …) do not.
     const rows = await db
       .select({
         ...getTableColumns(boards),
@@ -69,7 +73,12 @@ export async function listPublicBoardsWithStats(
       .from(boards)
       .leftJoin(
         posts,
-        and(eq(posts.boardId, boards.id), isNull(posts.deletedAt), postViewFilter(actor))
+        and(
+          eq(posts.boardId, boards.id),
+          isNull(posts.deletedAt),
+          postViewFilter(actor),
+          sql`(${posts.statusId} IS NULL OR ${posts.statusId} IN (SELECT ${postStatuses.id} FROM ${postStatuses} WHERE ${postStatuses.category} = 'active'))`
+        )
       )
       // boardViewFilter embeds isNull(boards.deletedAt) in every branch — no
       // outer guard needed here. Callers of postViewFilter still need their
