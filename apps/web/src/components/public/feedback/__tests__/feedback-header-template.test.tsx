@@ -154,7 +154,7 @@ function writeUnderFirstHeading() {
     content: [
       {
         type: 'heading',
-        attrs: { level: 2, [TEMPLATE_HEADING_ATTR]: true },
+        attrs: { level: 2, [TEMPLATE_HEADING_ATTR]: 'What went wrong?' },
         content: [{ type: 'text', text: 'What went wrong?' }],
       },
       { type: 'paragraph', content: [{ type: 'text', text: 'It crashed' }] },
@@ -213,7 +213,8 @@ describe('portal composer board template', () => {
     await screen.findByTestId('editor')
     await waitFor(() => expect(lastValue()).not.toBe(''))
     fireEvent.click(screen.getByRole('button', { name: 'board:General' }))
-    await waitFor(() => expect((lastValue() as { content: unknown[] }).content).toEqual([]))
+    // '' clears the editor (its value-sync treats '' as "empty the document").
+    await waitFor(() => expect(lastValue()).toBe(''))
   })
 
   it('switching board after writing keeps the body and offers the new template', async () => {

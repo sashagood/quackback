@@ -2,9 +2,11 @@
  * The template state of one composer. `editorSeed` is what the editor is
  * handed as `value`: it changes identity only when this hook decides the body
  * should be replaced or extended (new object → the editor's value-sync effect
- * calls setContent), so typing never fights a controlled value.
+ * calls setContent), so typing never fights a controlled value. The empty
+ * seed is `''`, never an empty document object, so a composer's own fallback
+ * value (a host prefill, for example) is never shadowed by "no template".
  */
-import { useCallback, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import type { JSONContent } from '@tiptap/core'
 import type { TiptapContent } from '@/lib/shared/db-types'
 import {
@@ -12,6 +14,7 @@ import {
   buildTemplateDoc,
   finalizeTemplateDoc,
   isUntouchedTemplate,
+  readBoardTemplate,
 } from '@/lib/shared/post-templates'
 
 /** Composers hand over the editor's own JSONContent; the pure module reads the DB shape. */
@@ -22,12 +25,13 @@ export interface PostTemplateDraft {
   editorSeed: TiptapContent | ''
   /**
    * A board was chosen. Replaces the body with its headings when the body is
-   * untouched (an undefined/empty template clears it) and returns true;
-   * keeps a dirty body and returns false.
+   * untouched (no template clears it back to the empty seed) and returns
+   * true; keeps a dirty body and returns false. Accepts whatever is stored:
+   * a malformed template reads as no template.
    */
-  applyTemplate: (headings: readonly string[] | undefined, currentDoc: Doc) => boolean
+  applyTemplate: (headings: unknown, currentDoc: Doc) => boolean
   /** Append the headings after the current body (the "Insert template" affordance). */
-  insertTemplate: (headings: readonly string[], currentDoc: Doc) => void
+  insertTemplate: (headings: unknown, currentDoc: Doc) => void
   /** The body to submit: empty template sections stripped, marker removed. */
   finalize: (currentDoc: Doc) => TiptapContent | null
   reset: () => void
@@ -36,21 +40,24 @@ export interface PostTemplateDraft {
 export function usePostTemplateDraft(): PostTemplateDraft {
   const [editorSeed, setEditorSeed] = useState<TiptapContent | ''>('')
 
-  const applyTemplate = useCallback((headings: readonly string[] | undefined, currentDoc: Doc) => {
+  const applyTemplate = useCallback((headings: unknown, currentDoc: Doc) => {
     if (!isUntouchedTemplate(asDoc(currentDoc))) return false
-    // A hand-edited settings JSON may hold anything; anything but a string
-    // list is "no template" rather than a crash in every composer.
-    const safe = Array.isArray(headings) ? headings.filter((h) => typeof h === 'string') : []
-    setEditorSeed(buildTemplateDoc(safe))
+    const safe = readBoardTemplate(headings)
+    setEditorSeed(safe.length === 0 ? '' : buildTemplateDoc(safe))
     return true
   }, [])
 
-  const insertTemplate = useCallback((headings: readonly string[], currentDoc: Doc) => {
-    setEditorSeed(appendTemplate(asDoc(currentDoc), headings))
+  const insertTemplate = useCallback((headings: unknown, currentDoc: Doc) => {
+    const safe = readBoardTemplate(headings)
+    if (safe.length === 0) return
+    setEditorSeed(appendTemplate(asDoc(currentDoc), safe))
   }, [])
 
   const finalize = useCallback((currentDoc: Doc) => finalizeTemplateDoc(asDoc(currentDoc)), [])
   const reset = useCallback(() => setEditorSeed(''), [])
 
-  return { editorSeed, applyTemplate, insertTemplate, finalize, reset }
+  return useMemo(
+    () => ({ editorSeed, applyTemplate, insertTemplate, finalize, reset }),
+    [editorSeed, applyTemplate, insertTemplate, finalize, reset]
+  )
 }

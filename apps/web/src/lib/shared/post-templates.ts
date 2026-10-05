@@ -3,10 +3,11 @@
  *
  * A template is an ordered list of H2 question headings stored on
  * boards.settings.template. The editor inserts them as heading nodes carrying
- * `attrs[TEMPLATE_HEADING_ATTR] = true` so a composer can tell provenance
- * (template vs user-authored) without comparing whole documents. The marker
- * never reaches the database: `finalizeTemplateDoc` strips it on submit and
- * the server sanitizer drops unknown heading attrs.
+ * `attrs[TEMPLATE_HEADING_ATTR] = <the original heading text>` so a composer
+ * can tell provenance (template vs user-authored) without comparing whole
+ * documents, and so a heading the user edited stops being "template". The
+ * marker never reaches the database: `finalizeTemplateDoc` strips it on
+ * submit and the server sanitizer drops unknown heading attrs.
  *
  * Definitions (all total, none mutate their input):
  *  - empty paragraph: a paragraph with no text leaf containing non-whitespace
@@ -39,8 +40,19 @@ function isParagraphEmpty(node: Node): boolean {
   return true
 }
 
+function headingText(node: Node): string {
+  return (node.content ?? []).map((c) => (c.type === 'text' ? (c.text ?? '') : '')).join('')
+}
+
+/**
+ * A heading is "template" only while it still reads what the template put
+ * there: the marker carries the ORIGINAL text, so a heading the user rewrote
+ * (or typed into) counts as their content and is never replaced or stripped.
+ */
 function isTemplateHeading(node: Node): boolean {
-  return node.type === 'heading' && node.attrs?.[TEMPLATE_HEADING_ATTR] === true
+  if (node.type !== 'heading') return false
+  const marker = node.attrs?.[TEMPLATE_HEADING_ATTR]
+  return typeof marker === 'string' && headingText(node).trim() === marker
 }
 
 function isSectionHeading(node: Node): boolean {
@@ -50,7 +62,7 @@ function isSectionHeading(node: Node): boolean {
 function templateHeadingNode(text: string): Node {
   return {
     type: 'heading',
-    attrs: { level: 2, [TEMPLATE_HEADING_ATTR]: true },
+    attrs: { level: 2, [TEMPLATE_HEADING_ATTR]: text },
     content: [{ type: 'text', text }],
   }
 }
@@ -118,6 +130,25 @@ export function finalizeTemplateDoc(doc: TiptapContent | null | undefined): Tipt
   }
   if (out.length === 0 || out.every(isParagraphEmpty)) return null
   return { type: 'doc', content: out }
+}
+
+/**
+ * The template as every READ site must see it. `boards.settings` is a JSON
+ * column that can be hand-edited, so anything that is not a list of strings
+ * within the limits is treated as "no template" rather than crashing a
+ * composer or the settings page. Total: never throws.
+ */
+export function readBoardTemplate(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return []
+  const out: string[] = []
+  for (const h of raw) {
+    if (typeof h !== 'string') continue
+    const t = h.trim()
+    if (!t || t.length > BOARD_TEMPLATE_HEADING_MAX_LENGTH) continue
+    out.push(t)
+    if (out.length === BOARD_TEMPLATE_MAX_HEADINGS) break
+  }
+  return out
 }
 
 /** One heading per non-blank line, trimmed (the settings textarea → list). */

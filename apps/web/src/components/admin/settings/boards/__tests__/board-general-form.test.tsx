@@ -94,6 +94,15 @@ describe('<BoardGeneralForm> post template', () => {
     })
   })
 
+  it('renders a malformed stored template as empty instead of crashing', () => {
+    render(
+      <BoardGeneralForm
+        board={{ ...board, settings: { template: 'oops' as unknown as string[] } }}
+      />
+    )
+    expect((screen.getByLabelText('Post template') as HTMLTextAreaElement).value).toBe('')
+  })
+
   it('saves an empty template as no template', async () => {
     render(<BoardGeneralForm board={{ ...board, settings: { template: ['A'] } }} />)
     fireEvent.change(screen.getByLabelText('Post template'), { target: { value: '' } })

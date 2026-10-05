@@ -1,6 +1,7 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
 import { z } from 'zod'
+import { readBoardTemplate } from '@/lib/shared/post-templates'
 import {
   lazy,
   Suspense,
@@ -263,8 +264,11 @@ export const Route = createFileRoute('/widget/')({
         name: b.name,
         slug: b.slug,
         // Optional-shaped (not `template: undefined`) so this seed stays
-        // assignable to the capabilities query's WidgetVisibleBoard[].
-        ...(b.settings?.template ? { template: b.settings.template } : {}),
+        // assignable to the capabilities query's WidgetVisibleBoard[]; read
+        // through readBoardTemplate so a hand-edited value is "no template".
+        ...(readBoardTemplate(b.settings?.template).length > 0
+          ? { template: readBoardTemplate(b.settings?.template) }
+          : {}),
       })),
       orgSlug: settings?.slug ?? '',
       // Per-board submit/vote capability for the request actor, server-computed

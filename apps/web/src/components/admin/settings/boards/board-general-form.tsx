@@ -2,7 +2,11 @@ import { useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { standardSchemaResolver } from '@hookform/resolvers/standard-schema'
 import { updateBoardSchema, type UpdateBoardInput } from '@/lib/shared/schemas/boards'
-import { parseTemplateText, validateBoardTemplate } from '@/lib/shared/post-templates'
+import {
+  parseTemplateText,
+  readBoardTemplate,
+  validateBoardTemplate,
+} from '@/lib/shared/post-templates'
 import {
   BOARD_TEMPLATE_HEADING_MAX_LENGTH,
   BOARD_TEMPLATE_MAX_HEADINGS,
@@ -47,7 +51,8 @@ export function BoardGeneralForm({ board }: BoardGeneralFormProps) {
     defaultValues: {
       name: board.name,
       description: board.description || '',
-      templateText: (board.settings?.template ?? []).join('\n'),
+      // readBoardTemplate: a hand-edited settings JSON must not crash the page.
+      templateText: readBoardTemplate(board.settings?.template).join('\n'),
     },
   })
 

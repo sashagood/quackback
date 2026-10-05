@@ -24,6 +24,7 @@ import { isTeamMember } from '@/lib/shared/roles'
 import { can } from '@/lib/server/policy/authorize'
 import { PERMISSIONS } from '@/lib/shared/permissions'
 import { PageLimitMinOneSchema } from '@/lib/shared/schemas/taxonomy'
+import { readBoardTemplate } from '@/lib/shared/post-templates'
 import {
   fetchPublicPostDetailSchema,
   type FetchPublicPostDetailInput,
@@ -806,7 +807,7 @@ export const runFetchBoardCapabilities = createServerOnlyFn(
         id: String(board.id),
         name: board.name,
         slug: board.slug,
-        template: (board.settings as BoardSettings | null)?.template ?? undefined,
+        ...templateProp((board.settings as BoardSettings | null)?.template),
       })),
     }
   }
@@ -820,6 +821,12 @@ export const fetchBoardCapabilitiesFn = createServerFn({ method: 'GET' }).handle
 })
 
 export type WidgetVisibleBoard = { id: string; name: string; slug: string; template?: string[] }
+
+/** The widget's board template, present only when the stored value reads as a template. */
+function templateProp(raw: unknown): { template?: string[] } {
+  const template = readBoardTemplate(raw)
+  return template.length > 0 ? { template } : {}
+}
 
 // The first page of several columns of one board, under the same filters.
 const getPublicRoadmapColumnsSchema = getPublicRoadmapPostsSchema

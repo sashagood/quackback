@@ -159,6 +159,28 @@ describe('widget composer board template', () => {
     ])
   })
 
+  it('a host prefill after a template seed shows the host body, not the stale skeleton', async () => {
+    const { rerender } = renderHome()
+    typeTitle('Crash')
+    await screen.findByTestId('editor')
+    await waitFor(() => expect(lastValue()).not.toBe(''))
+    rerender(
+      <WidgetHomeAnimated
+        initialPosts={[]}
+        statuses={[]}
+        boards={[bugs]}
+        boardPermissions={{ board_bugs: { canSubmit: true, canVote: true } }}
+        composeRequest={{ nonce: 1, title: 'From host', body: 'host text', boardSlug: 'bugs' }}
+      />
+    )
+    await waitFor(() => {
+      const value = lastValue() as { content?: { type: string; content?: { text?: string }[] }[] }
+      expect(value).not.toBe('')
+      expect(value.content?.[0]?.type).toBe('paragraph')
+      expect(value.content?.[0]?.content?.[0]?.text).toBe('host text')
+    })
+  })
+
   it('submits a null body when nothing was written under the headings', async () => {
     renderHome()
     typeTitle('Crash')

@@ -51,6 +51,7 @@ import type { JSONContent } from '@tiptap/react'
 import type { EditorDocument } from '@/components/ui/rich-text-editor'
 import type { TiptapContent } from '@/lib/shared/schemas/posts'
 import { usePostTemplateDraft } from '@/components/shared/use-post-template-draft'
+import { readBoardTemplate } from '@/lib/shared/post-templates'
 import {
   composeBodyFromPlainText,
   resolveComposeBoardId,
@@ -497,14 +498,16 @@ export function WidgetHomeAnimated({
   const draft = usePostTemplateDraft()
   const [showInsertTemplate, setShowInsertTemplate] = useState(false)
   const selectedBoard = boards.find((b) => b.id === selectedBoardId)
+  // Read through readBoardTemplate: a hand-edited settings JSON is "no template".
+  const selectedTemplate = readBoardTemplate(selectedBoard?.template)
   const currentDoc = () => (detailsRef.current?.json() as TiptapContent | undefined) ?? null
   const handleComposeBoardChange = useCallback(
     (id: string) => {
       composeBoardDirtyRef.current = true
       setSelectedBoardId(id)
-      const next = boards.find((b) => b.id === id)?.template
+      const next = readBoardTemplate(boards.find((b) => b.id === id)?.template)
       const replaced = draft.applyTemplate(next, currentDoc())
-      setShowInsertTemplate(!replaced && (next?.length ?? 0) > 0)
+      setShowInsertTemplate(!replaced && next.length > 0)
     },
     // oxlint-disable-next-line react-hooks/exhaustive-deps -- currentDoc reads a ref
     [boards, draft]
@@ -515,7 +518,7 @@ export function WidgetHomeAnimated({
   useEffect(() => {
     if (!expanded) return
     if (editorContent) return
-    draft.applyTemplate(selectedBoard?.template, currentDoc())
+    draft.applyTemplate(selectedTemplate, currentDoc())
     // oxlint-disable-next-line react-hooks/exhaustive-deps -- seed once per expand
   }, [expanded])
 
@@ -529,6 +532,10 @@ export function WidgetHomeAnimated({
     if (composeRequest.body) {
       const next = composeBodyFromPlainText(composeRequest.body)
       detailsRef.current = { json: () => next.json, html: () => next.html }
+      // The host body is the one value source now: drop any template seed so
+      // it cannot shadow what the host asked to show.
+      draft.reset()
+      setShowInsertTemplate(false)
       setEditorContent(next.json)
     }
     setSelectedBoardId(resolveComposeBoardId(boards, composeRequest.boardSlug, defaultBoard))
@@ -983,6 +990,7 @@ export function WidgetHomeAnimated({
                         minHeight="80px"
                         borderless
                         features={{
+                          templateHeadings: true,
                           headings: true,
                           codeBlocks: true,
                           taskLists: true,
@@ -1001,19 +1009,19 @@ export function WidgetHomeAnimated({
                         className="text-sm"
                       />
                     </Suspense>
-                    {showInsertTemplate && selectedBoard?.template && (
+                    {showInsertTemplate && selectedTemplate.length > 0 && (
                       <button
                         type="button"
                         className="mt-1 text-xs text-primary hover:underline"
                         onClick={() => {
-                          draft.insertTemplate(selectedBoard.template!, currentDoc())
+                          draft.insertTemplate(selectedTemplate, currentDoc())
                           setShowInsertTemplate(false)
                         }}
                       >
                         <FormattedMessage
                           id="widget.home.form.insertTemplate"
                           defaultMessage="Insert {board} template"
-                          values={{ board: selectedBoard.name }}
+                          values={{ board: selectedBoard?.name ?? '' }}
                         />
                       </button>
                     )}

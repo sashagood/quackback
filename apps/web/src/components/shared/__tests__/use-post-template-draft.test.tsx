@@ -11,7 +11,7 @@ const typed: TiptapContent = {
   content: [
     {
       type: 'heading',
-      attrs: { level: 2, [TEMPLATE_HEADING_ATTR]: true },
+      attrs: { level: 2, [TEMPLATE_HEADING_ATTR]: 'What went wrong?' },
       content: [{ type: 'text', text: 'What went wrong?' }],
     },
     { type: 'paragraph', content: [{ type: 'text', text: 'It crashed' }] },
@@ -41,11 +41,21 @@ describe('usePostTemplateDraft', () => {
     expect(result.current.editorSeed).toEqual(buildTemplateDoc(['Goal?']))
   })
 
-  it('a board without a template clears an untouched skeleton', () => {
+  it('a board without a template clears an untouched skeleton back to the empty seed', () => {
     const { result } = renderHook(() => usePostTemplateDraft())
     act(() => void result.current.applyTemplate(BUG, null))
     act(() => void result.current.applyTemplate(undefined, buildTemplateDoc(BUG)))
-    expect(result.current.editorSeed).toEqual({ type: 'doc', content: [] })
+    // '' (not an empty doc object): the composers fall back to their own
+    // value for '', so a host prefill is never shadowed by an empty seed.
+    expect(result.current.editorSeed).toBe('')
+  })
+
+  it('a board without a template is a no-op on a fresh composer', () => {
+    const { result } = renderHook(() => usePostTemplateDraft())
+    act(() => void result.current.applyTemplate(undefined, null))
+    expect(result.current.editorSeed).toBe('')
+    act(() => void result.current.applyTemplate([], null))
+    expect(result.current.editorSeed).toBe('')
   })
 
   it('keeps a dirty body and reports it did not replace', () => {
@@ -73,7 +83,15 @@ describe('usePostTemplateDraft', () => {
     act(
       () => void result.current.applyTemplate('oops' as unknown as string[], buildTemplateDoc(BUG))
     )
-    expect(result.current.editorSeed).toEqual({ type: 'doc', content: [] })
+    expect(result.current.editorSeed).toBe('')
+  })
+
+  it('insertTemplate ignores a malformed template instead of throwing', () => {
+    const { result } = renderHook(() => usePostTemplateDraft())
+    expect(() =>
+      act(() => result.current.insertTemplate('oops' as unknown as string[], typed))
+    ).not.toThrow()
+    expect(result.current.editorSeed).toBe('')
   })
 
   it('finalize strips empty template sections and reset clears the seed', () => {

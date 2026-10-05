@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect, lazy, Suspense } from 'react'
 import { usePostTemplateDraft } from '@/components/shared/use-post-template-draft'
+import { readBoardTemplate } from '@/lib/shared/post-templates'
 import { useKeyboardSubmit } from '@/lib/client/hooks/use-keyboard-submit'
 import { ModalFooter } from '@/components/shared/modal-footer'
 import { useForm, Controller } from 'react-hook-form'
@@ -169,7 +170,8 @@ export function CreatePostDialog({
 
   const selectedBoard = boards.find((b) => b.id === watchedBoardId)
   const selectedStatus = statuses.find((s) => s.id === watchedStatusId)
-  const selectedTemplate = selectedBoard?.settings?.template
+  // Read through readBoardTemplate: a hand-edited settings JSON is "no template".
+  const selectedTemplate = readBoardTemplate(selectedBoard?.settings?.template)
 
   // Apply the board's template whenever the dialog is open and the board
   // changes (including the initial board on open). A dirty body is kept and
@@ -177,7 +179,7 @@ export function CreatePostDialog({
   useEffect(() => {
     if (!open) return
     const replaced = draft.applyTemplate(selectedTemplate, contentJson)
-    setShowInsertTemplate(!replaced && (selectedTemplate?.length ?? 0) > 0)
+    setShowInsertTemplate(!replaced && selectedTemplate.length > 0)
     // oxlint-disable-next-line react-hooks/exhaustive-deps -- re-run on open/board only
   }, [open, watchedBoardId])
 
@@ -239,6 +241,7 @@ export function CreatePostDialog({
                               borderless
                               toolbarPosition="bottom"
                               features={{
+                                templateHeadings: true,
                                 headings: true,
                                 codeBlocks: true,
                                 taskLists: true,
@@ -263,7 +266,7 @@ export function CreatePostDialog({
                   />
                 </div>
 
-                {showInsertTemplate && selectedTemplate && (
+                {showInsertTemplate && selectedTemplate.length > 0 && (
                   <div className="px-4 sm:px-6">
                     <button
                       type="button"

@@ -24,6 +24,7 @@ import { SimilarPostsCard } from '@/components/public/similar-posts-card'
 import { BoardCustomFields } from '@/components/public/feedback/board-custom-fields'
 import { PostingToBoard } from '@/components/public/feedback/posting-to-board'
 import { usePostTemplateDraft } from '@/components/shared/use-post-template-draft'
+import { readBoardTemplate } from '@/lib/shared/post-templates'
 import { validatePostCustomFieldValues } from '@/lib/shared/post-custom-fields'
 import type { BoardSettings } from '@/lib/shared/db-types'
 import { signOut } from '@/lib/client/auth-client'
@@ -137,7 +138,8 @@ export function FeedbackHeaderAnimated({
   // decided when the board changes, from the body as it is then.
   const draft = usePostTemplateDraft()
   const [showInsertTemplate, setShowInsertTemplate] = useState(false)
-  const selectedTemplate = selectedBoard?.settings?.template
+  // Read through readBoardTemplate: a hand-edited settings JSON is "no template".
+  const selectedTemplate = readBoardTemplate(selectedBoard?.settings?.template)
 
   // Focus title input when form expands
   useEffect(() => {
@@ -324,9 +326,9 @@ export function FeedbackHeaderAnimated({
                 setCustomFieldValues({})
                 // The new board's template replaces an untouched body; a dirty
                 // body is kept and the template is offered instead.
-                const next = boards.find((b) => b.id === id)?.settings?.template
+                const next = readBoardTemplate(boards.find((b) => b.id === id)?.settings?.template)
                 const replaced = draft.applyTemplate(next, detailsRef.current?.json() ?? null)
-                setShowInsertTemplate(!replaced && (next?.length ?? 0) > 0)
+                setShowInsertTemplate(!replaced && next.length > 0)
               }}
             />
           </motion.div>
@@ -405,6 +407,7 @@ export function FeedbackHeaderAnimated({
                   toolbarPosition="bottom"
                   features={{
                     ...PUBLIC_FEEDBACK_EDITOR_FEATURES,
+                    templateHeadings: true,
                     images: canUploadMedia,
                     videos: canUploadMedia,
                   }}
@@ -412,7 +415,7 @@ export function FeedbackHeaderAnimated({
                   onVideoUpload={canUploadMedia ? uploadMediaWithSession : undefined}
                 />
               </Suspense>
-              {showInsertTemplate && selectedTemplate && (
+              {showInsertTemplate && selectedTemplate.length > 0 && (
                 <button
                   type="button"
                   className="mt-1 text-xs text-primary hover:underline"
