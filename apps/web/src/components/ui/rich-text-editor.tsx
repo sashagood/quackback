@@ -30,6 +30,7 @@ import { QuackbackEmbed } from './quackback-embed-extension'
 import { ConversationImage } from './conversation-image-node'
 import { UploadedVideo } from './uploaded-video-node'
 import { Markdown } from '@tiptap/markdown'
+import { TEMPLATE_HEADING_ATTR } from '@/lib/shared/post-templates'
 import { Extension, getHTMLFromFragment } from '@tiptap/core'
 import type { Range } from '@tiptap/core'
 import Suggestion, { type SuggestionOptions, type SuggestionProps } from '@tiptap/suggestion'
@@ -187,6 +188,45 @@ lowlight.registerAlias({
  *
  * NOTE: StarterKit v3 bundles Underline by default — do NOT add it separately.
  */
+/**
+ * Marks headings inserted by a board template so the composer can tell
+ * provenance (see lib/shared/post-templates): the attribute holds the
+ * ORIGINAL heading text, or null for any other heading. JSON-only: never
+ * rendered to HTML, never parsed from pasted HTML; the server sanitizer drops
+ * it, and finalizeTemplateDoc strips it before submit. Registered only for
+ * composers that opt in (`features.templateHeadings`) so other editors'
+ * getJSON() output is unchanged.
+ */
+const TemplateHeadingAttribute = Extension.create({
+  name: 'templateHeadingAttribute',
+  addGlobalAttributes() {
+    return [
+      {
+        types: ['heading'],
+        attributes: {
+          [TEMPLATE_HEADING_ATTR]: { default: null, rendered: false, keepOnSplit: false },
+        },
+      },
+    ]
+  },
+})
+
+/**
+ * After a template seed is applied with setContent, the selection maps to
+ * the END of the new document (the last empty paragraph). Move it into the
+ * paragraph under the FIRST heading so the author answers the first question.
+ * No-op when the document does not start with a template heading.
+ */
+export function placeCursorAfterTemplateSeed(editor: Pick<Editor, 'state' | 'commands'>): void {
+  const { doc } = editor.state
+  const first = doc.firstChild
+  if (!first || doc.childCount < 2) return
+  if (first.type.name !== 'heading' || typeof first.attrs[TEMPLATE_HEADING_ATTR] !== 'string')
+    return
+  // 0 is before the first node; +nodeSize is after it; +1 steps inside the next node.
+  editor.commands.setTextSelection(first.nodeSize + 1)
+}
+
 export function buildExtensions(
   features: EditorFeatures,
   options: {
@@ -206,6 +246,7 @@ export function buildExtensions(
       horizontalRule: features.dividers ? {} : false,
       link: false,
     }),
+    ...(features.templateHeadings ? [TemplateHeadingAttribute] : []),
     Placeholder.configure({
       placeholder,
       emptyEditorClass: 'is-editor-empty',
@@ -566,6 +607,12 @@ export function seedMarkdownFallback(
  * Basic features (bold, italic, lists, links) are always available.
  */
 export interface EditorFeatures {
+  /**
+   * Board post templates: register the `templateHeading` provenance attribute
+   * on headings and place the cursor under the first heading after a seed.
+   * Only the new-post composers set this.
+   */
+  templateHeadings?: boolean
   /** Enable H1, H2, H3 heading buttons */
   headings?: boolean
   /** Enable image paste/drop/button with upload support */
@@ -1461,6 +1508,7 @@ function RichTextEditorBase({
       features.emojiPicker,
       features.enterAsHardBreak,
       features.mentions,
+      features.templateHeadings,
       onImageUpload,
       onVideoUpload,
       onSubmit,
@@ -1627,6 +1675,7 @@ function RichTextEditorBase({
       const newContent = JSON.stringify(value)
       if (currentContent !== newContent) {
         editor.commands.setContent(value)
+        placeCursorAfterTemplateSeed(editor)
       }
     }
   }, [value, editor])
@@ -1910,6 +1959,7 @@ const FEATURE_FLAGS: Record<keyof EditorFeatures, true> = {
   emojiPicker: true,
   enterAsHardBreak: true,
   mentions: true,
+  templateHeadings: true,
 }
 const FEATURE_KEYS = Object.keys(FEATURE_FLAGS) as (keyof EditorFeatures)[]
 

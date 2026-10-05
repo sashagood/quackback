@@ -1,6 +1,17 @@
+import { useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { standardSchemaResolver } from '@hookform/resolvers/standard-schema'
 import { updateBoardSchema, type UpdateBoardInput } from '@/lib/shared/schemas/boards'
+import {
+  parseTemplateText,
+  readBoardTemplate,
+  validateBoardTemplate,
+} from '@/lib/shared/post-templates'
+import {
+  BOARD_TEMPLATE_HEADING_MAX_LENGTH,
+  BOARD_TEMPLATE_MAX_HEADINGS,
+  type BoardSettings,
+} from '@/lib/shared/db-types'
 import { Input } from '@/components/ui/input'
 import { FormError } from '@/components/shared/form-error'
 import { Textarea } from '@/components/ui/textarea'
@@ -22,6 +33,7 @@ interface Board {
   name: string
   slug: string
   description: string | null
+  settings?: BoardSettings
 }
 
 interface BoardGeneralFormProps {
@@ -32,20 +44,34 @@ export function BoardGeneralForm({ board }: BoardGeneralFormProps) {
   const mutation = useUpdateBoard()
   const navigate = useNavigate()
 
+  const [templateError, setTemplateError] = useState<string | null>(null)
+
   const form = useForm<UpdateBoardInput>({
     resolver: standardSchemaResolver(updateBoardSchema),
     defaultValues: {
       name: board.name,
       description: board.description || '',
+      // readBoardTemplate: a hand-edited settings JSON must not crash the page.
+      templateText: readBoardTemplate(board.settings?.template).join('\n'),
     },
   })
 
   function onSubmit(data: UpdateBoardInput) {
+    // The textarea is parsed (one heading per line) and validated with the
+    // same rules the server applies; the server merges `settings` so the
+    // board's other settings (custom fields, roadmap statuses) survive.
+    const parsed = validateBoardTemplate(parseTemplateText(data.templateText ?? ''))
+    if (!parsed.ok) {
+      setTemplateError(parsed.message)
+      return
+    }
+    setTemplateError(null)
     mutation.mutate(
       {
         id: board.id,
         name: data.name,
         description: data.description,
+        settings: { template: parsed.value },
       },
       {
         onSuccess: (updated) => {
@@ -90,6 +116,30 @@ export function BoardGeneralForm({ board }: BoardGeneralFormProps) {
               <FormControl>
                 <Textarea rows={3} {...field} />
               </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+
+        <FormField
+          control={form.control}
+          name="templateText"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Post template</FormLabel>
+              <FormControl>
+                <Textarea
+                  rows={5}
+                  placeholder={'What went wrong?\nWhat should happen?'}
+                  {...field}
+                />
+              </FormControl>
+              <p className="text-xs text-muted-foreground">
+                One heading per line, up to {BOARD_TEMPLATE_MAX_HEADINGS} headings of{' '}
+                {BOARD_TEMPLATE_HEADING_MAX_LENGTH} characters. New posts on this board start with
+                these as section headings; leave empty for none.
+              </p>
+              {templateError && <p className="text-sm text-destructive">{templateError}</p>}
               <FormMessage />
             </FormItem>
           )}

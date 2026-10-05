@@ -23,6 +23,8 @@ import { useEnsureAnonSession } from '@/lib/client/hooks/use-ensure-anon-session
 import { SimilarPostsCard } from '@/components/public/similar-posts-card'
 import { BoardCustomFields } from '@/components/public/feedback/board-custom-fields'
 import { PostingToBoard } from '@/components/public/feedback/posting-to-board'
+import { usePostTemplateDraft } from '@/components/shared/use-post-template-draft'
+import { readBoardTemplate } from '@/lib/shared/post-templates'
 import { validatePostCustomFieldValues } from '@/lib/shared/post-custom-fields'
 import type { BoardSettings } from '@/lib/shared/db-types'
 import { signOut } from '@/lib/client/auth-client'
@@ -129,6 +131,16 @@ export function FeedbackHeaderAnimated({
   const selectedBoard = boards.find((b) => b.id === selectedBoardId)
   const boardCustomFields = selectedBoard?.settings?.customFields ?? []
 
+  // The board's post template (PRO-529). `draft.editorSeed` is the editor's
+  // controlled value; it only changes when a board is picked over an untouched
+  // body or the author asks for the template to be inserted. The header does
+  // not re-render on keystrokes, so whether to offer "Insert template" is
+  // decided when the board changes, from the body as it is then.
+  const draft = usePostTemplateDraft()
+  const [showInsertTemplate, setShowInsertTemplate] = useState(false)
+  // Read through readBoardTemplate: a hand-edited settings JSON is "no template".
+  const selectedTemplate = readBoardTemplate(selectedBoard?.settings?.template)
+
   // Focus title input when form expands
   useEffect(() => {
     if (expanded && titleInputRef.current) {
@@ -136,6 +148,13 @@ export function FeedbackHeaderAnimated({
         titleInputRef.current?.focus()
       })
     }
+  }, [expanded])
+
+  // Seed the body from the preselected board each time the form opens.
+  useEffect(() => {
+    if (!expanded) return
+    draft.applyTemplate(selectedTemplate, detailsRef.current?.json() ?? null)
+    // oxlint-disable-next-line react-hooks/exhaustive-deps -- seed once per expand
   }, [expanded])
 
   // The details as written. Typing keeps them here rather than in state, so a
@@ -211,12 +230,16 @@ export function FeedbackHeaderAnimated({
         }
       }
 
+      // Untouched template sections are dropped; a body of only headings is
+      // sent as no body. `undefined`, not null: createPublicPostSchema's
+      // contentJson is `.optional()` and rejects null.
       const details = detailsRef.current
+      const finalJson = draft.finalize(details?.json() ?? null)
       const result = await createPost.mutateAsync({
         boardId: selectedBoardId as BoardId,
         title: typedTitle.trim(),
-        content: details?.markdown() ?? '',
-        contentJson: details?.json() ?? null,
+        content: finalJson ? (details?.markdown() ?? '') : '',
+        contentJson: finalJson ?? undefined,
         ...(boardCustomFields.length > 0 ? { customFields: customFieldValues } : {}),
       })
 
@@ -256,6 +279,8 @@ export function FeedbackHeaderAnimated({
     title.set('')
     detailsRef.current = null
     setCustomFieldValues({})
+    draft.reset()
+    setShowInsertTemplate(false)
     setError('')
   }
 
@@ -299,6 +324,11 @@ export function FeedbackHeaderAnimated({
                 // Answers are per-board: switching boards drops the previous
                 // board's field values rather than smuggling them across.
                 setCustomFieldValues({})
+                // The new board's template replaces an untouched body; a dirty
+                // body is kept and the template is offered instead.
+                const next = readBoardTemplate(boards.find((b) => b.id === id)?.settings?.template)
+                const replaced = draft.applyTemplate(next, detailsRef.current?.json() ?? null)
+                setShowInsertTemplate(!replaced && next.length > 0)
               }}
             />
           </motion.div>
@@ -366,7 +396,7 @@ export function FeedbackHeaderAnimated({
             >
               <Suspense fallback={<RichTextEditorPlaceholder minHeight="150px" />}>
                 <LazyRichTextEditor
-                  value=""
+                  value={draft.editorSeed}
                   onDocumentChange={handleContentChange}
                   placeholder={intl.formatMessage({
                     id: 'portal.feedback.header.detailsPlaceholder',
@@ -377,6 +407,7 @@ export function FeedbackHeaderAnimated({
                   toolbarPosition="bottom"
                   features={{
                     ...PUBLIC_FEEDBACK_EDITOR_FEATURES,
+                    templateHeadings: true,
                     images: canUploadMedia,
                     videos: canUploadMedia,
                   }}
@@ -384,6 +415,22 @@ export function FeedbackHeaderAnimated({
                   onVideoUpload={canUploadMedia ? uploadMediaWithSession : undefined}
                 />
               </Suspense>
+              {showInsertTemplate && selectedTemplate.length > 0 && (
+                <button
+                  type="button"
+                  className="mt-1 text-xs text-primary hover:underline"
+                  onClick={() => {
+                    draft.insertTemplate(selectedTemplate, detailsRef.current?.json() ?? null)
+                    setShowInsertTemplate(false)
+                  }}
+                >
+                  <FormattedMessage
+                    id="portal.feedback.header.insertTemplate"
+                    defaultMessage="Insert {board} template"
+                    values={{ board: selectedBoard?.name ?? '' }}
+                  />
+                </button>
+              )}
             </motion.div>
 
             {/* Board-configured custom intake fields */}

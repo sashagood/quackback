@@ -1,4 +1,6 @@
-import { useState, useCallback, lazy, Suspense } from 'react'
+import { useState, useCallback, useEffect, lazy, Suspense } from 'react'
+import { usePostTemplateDraft } from '@/components/shared/use-post-template-draft'
+import { readBoardTemplate } from '@/lib/shared/post-templates'
 import { useKeyboardSubmit } from '@/lib/client/hooks/use-keyboard-submit'
 import { ModalFooter } from '@/components/shared/modal-footer'
 import { useForm, Controller } from 'react-hook-form'
@@ -66,6 +68,11 @@ export function CreatePostDialog({
   const open = controlledOpen ?? internalOpen
   const setOpen = controlledOnOpenChange ?? setInternalOpen
   const [contentJson, setContentJson] = useState<JSONContent | null>(null)
+  // The board's post template (PRO-529): applied over an untouched body when
+  // the dialog opens or the board changes; offered as "Insert template" when
+  // the body is already dirty.
+  const draft = usePostTemplateDraft()
+  const [showInsertTemplate, setShowInsertTemplate] = useState(false)
 
   const { upload: uploadMedia } = usePostMediaUpload()
   const [authorPrincipalId, setAuthorPrincipalId] = useState(currentUser.principalId)
@@ -110,14 +117,18 @@ export function CreatePostDialog({
   )
 
   const handleSubmit = form.handleSubmit((data) => {
+    // Untouched template sections are dropped; a body of only headings is
+    // sent as no body. `undefined`, not null: the server schema's contentJson
+    // is `.optional()` and rejects null.
+    const finalJson = draft.finalize(contentJson)
     createPostMutation.mutate(
       {
         title: data.title,
-        content: data.content,
+        content: finalJson ? data.content : '',
         boardId: data.boardId,
         statusId: data.statusId,
         tagIds: data.tagIds,
-        contentJson,
+        contentJson: finalJson ?? undefined,
         authorPrincipalId,
       } as CreatePostInput & { authorPrincipalId?: string },
       {
@@ -125,6 +136,8 @@ export function CreatePostDialog({
           setOpen(false)
           form.reset()
           setContentJson(null)
+          draft.reset()
+          setShowInsertTemplate(false)
           setAuthorPrincipalId(currentUser.principalId)
           onPostCreated?.()
         },
@@ -137,6 +150,8 @@ export function CreatePostDialog({
     if (!isOpen) {
       form.reset()
       setContentJson(null)
+      draft.reset()
+      setShowInsertTemplate(false)
       setAuthorPrincipalId(currentUser.principalId)
       createPostMutation.reset()
     }
@@ -155,6 +170,18 @@ export function CreatePostDialog({
 
   const selectedBoard = boards.find((b) => b.id === watchedBoardId)
   const selectedStatus = statuses.find((s) => s.id === watchedStatusId)
+  // Read through readBoardTemplate: a hand-edited settings JSON is "no template".
+  const selectedTemplate = readBoardTemplate(selectedBoard?.settings?.template)
+
+  // Apply the board's template whenever the dialog is open and the board
+  // changes (including the initial board on open). A dirty body is kept and
+  // the template is offered instead.
+  useEffect(() => {
+    if (!open) return
+    const replaced = draft.applyTemplate(selectedTemplate, contentJson)
+    setShowInsertTemplate(!replaced && selectedTemplate.length > 0)
+    // oxlint-disable-next-line react-hooks/exhaustive-deps -- re-run on open/board only
+  }, [open, watchedBoardId])
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -207,13 +234,14 @@ export function CreatePostDialog({
                             }
                           >
                             <LazyRichTextEditor
-                              value={contentJson || ''}
+                              value={draft.editorSeed !== '' ? draft.editorSeed : contentJson || ''}
                               onDocumentChange={handleContentChange}
                               placeholder="Add more details... Type / for commands"
                               minHeight="200px"
                               borderless
                               toolbarPosition="bottom"
                               features={{
+                                templateHeadings: true,
                                 headings: true,
                                 codeBlocks: true,
                                 taskLists: true,
@@ -237,6 +265,21 @@ export function CreatePostDialog({
                     )}
                   />
                 </div>
+
+                {showInsertTemplate && selectedTemplate.length > 0 && (
+                  <div className="px-4 sm:px-6">
+                    <button
+                      type="button"
+                      className="text-xs text-primary hover:underline"
+                      onClick={() => {
+                        draft.insertTemplate(selectedTemplate, contentJson)
+                        setShowInsertTemplate(false)
+                      }}
+                    >
+                      Insert {selectedBoard?.name} template
+                    </button>
+                  </div>
+                )}
 
                 {/* Similar posts card */}
                 <div className="px-4 sm:px-6">

@@ -280,11 +280,13 @@ describe('feedback header post composer', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Submit' }))
 
     await waitFor(() => expect(createPost).toHaveBeenCalledTimes(1))
+    // No body → contentJson is omitted (undefined): the public create schema's
+    // contentJson is `.optional()` and the server rejects null.
     expect(createPost.mock.calls[0]![0]).toEqual({
       boardId: BOARD.id,
       title: 'Light mode',
       content: '',
-      contentJson: null,
+      contentJson: undefined,
     })
   })
 })

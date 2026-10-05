@@ -45,6 +45,8 @@ export {
   INTERACTIVE_BLOCK_KINDS,
   CSAT_FACES,
   DEFAULT_SETUP_STATE,
+  BOARD_TEMPLATE_MAX_HEADINGS,
+  BOARD_TEMPLATE_HEADING_MAX_LENGTH,
 } from '@quackback/db/types'
 export type {
   AccessTier,

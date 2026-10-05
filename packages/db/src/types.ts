@@ -84,6 +84,8 @@ export type NewBoard = InferInsertModel<typeof boards>
 export interface BoardSettings {
   roadmapStatusIds?: PostStatusId[] // Status IDs to show on roadmap
   customFields?: BoardCustomField[] // Extra intake fields the submission form renders
+  /** H2 question headings prefilled into a new post's body (PRO-529). Absent or empty = none. */
+  template?: string[]
 }
 
 /** The input controls a board custom field can render as on the public
@@ -114,6 +116,10 @@ export interface BoardCustomField {
 /** Validated custom-field answers as stored on a post row. Every field type
  *  coerces to a JSON scalar, so the map is always wire-serializable. */
 export type CustomFieldValues = Record<string, string | number | boolean>
+
+/** Limits for boards.settings.template (shared by the editor, the form, and the server). */
+export const BOARD_TEMPLATE_MAX_HEADINGS = 8
+export const BOARD_TEMPLATE_HEADING_MAX_LENGTH = 120
 
 // ----------------------------------------------------------------------
 // Per-action access tiers (View+Vote / Comment / Submit) and per-board
