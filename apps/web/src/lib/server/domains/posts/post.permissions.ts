@@ -349,11 +349,14 @@ async function hasCommentsFromOthers(
 ): Promise<boolean> {
   if (!authorPrincipalId) return false // Anonymous author can't have "other" comments
 
-  // Find any comment not from the author and not deleted (LIMIT 1 is faster than COUNT)
+  // Find any comment not from the author and not deleted (LIMIT 1 is faster than COUNT).
+  // A raw sql`` parameter bypasses the typeid column mapping, so the principal
+  // id must be converted by hand (it reached Postgres as 'principal_…' and
+  // failed with "invalid input syntax for type uuid" on every author edit).
   const otherComment = await db.query.postComments.findFirst({
     where: and(
       eq(postComments.postId, postId),
-      sql`${postComments.principalId} != ${authorPrincipalId}`,
+      sql`${postComments.principalId} != ${toUuid(authorPrincipalId)}::uuid`,
       isNull(postComments.deletedAt)
     ),
   })

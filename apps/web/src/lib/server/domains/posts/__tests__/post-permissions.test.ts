@@ -77,7 +77,10 @@ vi.mock('@/lib/server/domains/activity/activity.service', () => ({
   createActivity: vi.fn(),
 }))
 
+const { dispatchPostUpdated } = vi.hoisted(() => ({ dispatchPostUpdated: vi.fn() }))
+
 vi.mock('@/lib/server/events/dispatch', () => ({
+  dispatchPostUpdated,
   dispatchPostDeleted: vi.fn(),
   dispatchPostRestored: vi.fn(),
   buildEventActor: vi.fn((actor) => actor),
@@ -207,7 +210,8 @@ describe('post.permissions', () => {
     })
 
     it('enforces the same self-vote rule in the edit mutation', async () => {
-      mockFindFirst.mockResolvedValueOnce(authoredPost)
+      // The mutation loads the post, then the shared permission check loads it again.
+      mockFindFirst.mockResolvedValueOnce(authoredPost).mockResolvedValueOnce(authoredPost)
       mockPostVoteFindFirst.mockResolvedValueOnce(null)
       const { userEditPost } = await import('../post.user-actions')
 
@@ -218,6 +222,55 @@ describe('post.permissions', () => {
           EDIT_AUTHOR
         )
       ).resolves.toBeDefined()
+    })
+
+    it('lets the author save when an integration mirrored a non-default status', async () => {
+      mockFindFirst.mockResolvedValueOnce(mirroredPost).mockResolvedValueOnce(mirroredPost)
+      statusIsNotDefault()
+      mockPostVoteFindFirst.mockResolvedValueOnce(null)
+      const { userEditPost } = await import('../post.user-actions')
+
+      await expect(
+        userEditPost(
+          EDIT_POST_ID,
+          { title: 'Updated title', content: 'Updated content' },
+          EDIT_AUTHOR
+        )
+      ).resolves.toBeDefined()
+    })
+
+    it('rejects the save with the shared reason once the team changed the status', async () => {
+      mockFindFirst.mockResolvedValueOnce(mirroredPost).mockResolvedValueOnce(mirroredPost)
+      statusIsNotDefault()
+      ;(db.execute as unknown as Mock).mockResolvedValueOnce([{ reviewed: 1 }])
+      const { userEditPost } = await import('../post.user-actions')
+
+      await expect(
+        userEditPost(
+          EDIT_POST_ID,
+          { title: 'Updated title', content: 'Updated content' },
+          EDIT_AUTHOR
+        )
+      ).rejects.toThrow('Cannot edit posts that have been reviewed by the team')
+    })
+
+    // The Linear integration refreshes the linked issue on post.updated; the
+    // admin edit path emitted it, the author edit path did not.
+    it('announces the edit as post.updated so the linked Linear issue refreshes', async () => {
+      mockFindFirst.mockResolvedValueOnce(authoredPost).mockResolvedValueOnce(authoredPost)
+      mockPostVoteFindFirst.mockResolvedValueOnce(null)
+      const { userEditPost } = await import('../post.user-actions')
+
+      await userEditPost(
+        EDIT_POST_ID,
+        { title: 'Updated title', content: 'Updated content' },
+        EDIT_AUTHOR
+      )
+
+      expect(dispatchPostUpdated).toHaveBeenCalledTimes(1)
+      const [, post, changedFields] = dispatchPostUpdated.mock.calls[0]!
+      expect(post).toMatchObject({ id: EDIT_POST_ID })
+      expect(changedFields).toEqual(['title', 'content'])
     })
   })
 
