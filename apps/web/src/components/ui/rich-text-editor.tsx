@@ -187,6 +187,26 @@ lowlight.registerAlias({
  *
  * NOTE: StarterKit v3 bundles Underline by default — do NOT add it separately.
  */
+/**
+ * Marks headings inserted by a board template so the composer can tell
+ * provenance (see lib/shared/post-templates). JSON-only: never rendered to
+ * HTML, never parsed from pasted HTML; the server sanitizer drops it, and
+ * finalizeTemplateDoc strips it before submit.
+ */
+const TemplateHeadingAttribute = Extension.create({
+  name: 'templateHeadingAttribute',
+  addGlobalAttributes() {
+    return [
+      {
+        types: ['heading'],
+        attributes: {
+          templateHeading: { default: false, rendered: false, keepOnSplit: false },
+        },
+      },
+    ]
+  },
+})
+
 export function buildExtensions(
   features: EditorFeatures,
   options: {
@@ -206,6 +226,7 @@ export function buildExtensions(
       horizontalRule: features.dividers ? {} : false,
       link: false,
     }),
+    TemplateHeadingAttribute,
     Placeholder.configure({
       placeholder,
       emptyEditorClass: 'is-editor-empty',
