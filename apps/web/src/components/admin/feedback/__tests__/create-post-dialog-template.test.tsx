@@ -110,6 +110,7 @@ describe('admin create-post dialog board template', () => {
       title: 'Broken',
       boardId: 'board_01h455vb4pex5vsknk084sn02q',
     })
-    expect(mutate.mock.calls[0]![0].contentJson).toBeNull()
+    // undefined, never null: the server schema's contentJson is `.optional()`.
+    expect(mutate.mock.calls[0]![0].contentJson).toBeUndefined()
   })
 })

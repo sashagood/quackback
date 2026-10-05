@@ -229,14 +229,15 @@ export function FeedbackHeaderAnimated({
       }
 
       // Untouched template sections are dropped; a body of only headings is
-      // saved as no body (contentJson null, exactly as an empty editor was).
+      // sent as no body. `undefined`, not null: createPublicPostSchema's
+      // contentJson is `.optional()` and rejects null.
       const details = detailsRef.current
       const finalJson = draft.finalize(details?.json() ?? null)
       const result = await createPost.mutateAsync({
         boardId: selectedBoardId as BoardId,
         title: typedTitle.trim(),
         content: finalJson ? (details?.markdown() ?? '') : '',
-        contentJson: finalJson,
+        contentJson: finalJson ?? undefined,
         ...(boardCustomFields.length > 0 ? { customFields: customFieldValues } : {}),
       })
 

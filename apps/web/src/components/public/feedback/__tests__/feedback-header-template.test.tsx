@@ -202,7 +202,9 @@ describe('portal composer board template', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Submit' }))
     await waitFor(() => expect(createPost).toHaveBeenCalledTimes(1))
     expect(createPost.mock.calls[0]![0]).toMatchObject({ boardId: 'board_bugs', title: 'Broken' })
-    expect(createPost.mock.calls[0]![0].contentJson).toBeNull()
+    // undefined, never null: the public create schema's contentJson is
+    // `.optional()` and the server rejects null with "expected object".
+    expect(createPost.mock.calls[0]![0].contentJson).toBeUndefined()
   })
 
   it('switching to a board without a template clears an untouched skeleton', async () => {

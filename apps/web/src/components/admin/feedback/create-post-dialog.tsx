@@ -117,7 +117,8 @@ export function CreatePostDialog({
 
   const handleSubmit = form.handleSubmit((data) => {
     // Untouched template sections are dropped; a body of only headings is
-    // saved as no body (null, as an empty editor already was).
+    // sent as no body. `undefined`, not null: the server schema's contentJson
+    // is `.optional()` and rejects null.
     const finalJson = draft.finalize(contentJson)
     createPostMutation.mutate(
       {
@@ -126,7 +127,7 @@ export function CreatePostDialog({
         boardId: data.boardId,
         statusId: data.statusId,
         tagIds: data.tagIds,
-        contentJson: finalJson,
+        contentJson: finalJson ?? undefined,
         authorPrincipalId,
       } as CreatePostInput & { authorPrincipalId?: string },
       {
