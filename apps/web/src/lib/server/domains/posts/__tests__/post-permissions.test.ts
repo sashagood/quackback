@@ -6,9 +6,10 @@
  * - restorePost: 30-day restore window, validation
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { createId, type PostId, type PrincipalId } from '@quackback/ids'
+import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest'
+import { createId, type PostId, type PostStatusId, type PrincipalId } from '@quackback/ids'
 import { DEFAULT_PORTAL_CONFIG } from '@/lib/server/domains/settings'
+import { db } from '@/lib/server/db'
 
 // --- Mock tracking ---
 
@@ -148,6 +149,54 @@ describe('post.permissions', () => {
 
     it('reports the post as editable to the portal when only the author has voted', async () => {
       mockFindFirst.mockResolvedValueOnce(authoredPost)
+      mockPostVoteFindFirst.mockResolvedValueOnce(null)
+      const { getPostPermissions } = await import('../post.permissions')
+
+      await expect(getPostPermissions(EDIT_POST_ID, EDIT_AUTHOR)).resolves.toEqual({
+        canEdit: { allowed: true },
+        canDelete: { allowed: false, reason: 'Cannot delete posts that have received votes' },
+      })
+    })
+
+    // PRO-573: inbound integration sync mirrors Linear's state onto the post
+    // (a new issue lands in Triage within seconds). That move is written by
+    // the integration's service principal and is not a team review, so it
+    // must not close the author's edit window.
+    const mirroredPost = {
+      ...authoredPost,
+      statusId: createId('post_status') as PostStatusId,
+      postStatus: { isDefault: false },
+    }
+
+    function statusIsNotDefault() {
+      ;(db.query.postStatuses.findFirst as unknown as Mock).mockResolvedValueOnce(null)
+    }
+
+    it('keeps an author editing when an integration mirrored a non-default status', async () => {
+      mockFindFirst.mockResolvedValueOnce(mirroredPost)
+      statusIsNotDefault()
+      mockPostVoteFindFirst.mockResolvedValueOnce(null)
+      const { canEditPost } = await import('../post.permissions')
+
+      await expect(canEditPost(EDIT_POST_ID, EDIT_AUTHOR, DEFAULT_PORTAL_CONFIG)).resolves.toEqual({
+        allowed: true,
+      })
+    })
+
+    it('still locks an author once a team member changed the status in Quackback', async () => {
+      mockFindFirst.mockResolvedValueOnce(mirroredPost)
+      statusIsNotDefault()
+      ;(db.execute as unknown as Mock).mockResolvedValueOnce([{ reviewed: 1 }])
+      const { canEditPost } = await import('../post.permissions')
+
+      await expect(canEditPost(EDIT_POST_ID, EDIT_AUTHOR, DEFAULT_PORTAL_CONFIG)).resolves.toEqual({
+        allowed: false,
+        reason: 'Cannot edit posts that have been reviewed by the team',
+      })
+    })
+
+    it('reports a mirrored-status post as editable to the portal', async () => {
+      mockFindFirst.mockResolvedValueOnce(mirroredPost)
       mockPostVoteFindFirst.mockResolvedValueOnce(null)
       const { getPostPermissions } = await import('../post.permissions')
 
