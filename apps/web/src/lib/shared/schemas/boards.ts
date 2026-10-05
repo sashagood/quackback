@@ -117,6 +117,8 @@ export const createBoardSchema = z.object({
 export const updateBoardSchema = z.object({
   name: z.string().min(1, 'Board name is required').max(100),
   description: z.string().max(500).optional(),
+  /** The post-template textarea, one heading per line; parsed on submit (PRO-529). */
+  templateText: z.string().max(2000).optional(),
 })
 
 export const deleteBoardSchema = z.object({
