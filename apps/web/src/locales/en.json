@@ -150,6 +150,7 @@
   "portal.feedback.header.selectBoard": "Select a board",
   "portal.feedback.header.titlePlaceholder": "What's your idea?",
   "portal.feedback.header.detailsPlaceholder": "Add more details... Type / for commands",
+  "portal.feedback.header.insertTemplate": "Insert {board} template",
   "portal.feedback.header.postingAs": "Posting as",
   "portal.feedback.header.signOut": "sign out",
   "portal.feedback.header.postingAnonymously": "Posting anonymously",

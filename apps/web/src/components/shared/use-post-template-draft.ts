@@ -5,6 +5,7 @@
  * calls setContent), so typing never fights a controlled value.
  */
 import { useCallback, useState } from 'react'
+import type { JSONContent } from '@tiptap/core'
 import type { TiptapContent } from '@/lib/shared/db-types'
 import {
   appendTemplate,
@@ -13,7 +14,9 @@ import {
   isUntouchedTemplate,
 } from '@/lib/shared/post-templates'
 
-type Doc = TiptapContent | null | undefined
+/** Composers hand over the editor's own JSONContent; the pure module reads the DB shape. */
+type Doc = TiptapContent | JSONContent | null | undefined
+const asDoc = (doc: Doc) => doc as TiptapContent | null | undefined
 
 export interface PostTemplateDraft {
   editorSeed: TiptapContent | ''
@@ -34,7 +37,7 @@ export function usePostTemplateDraft(): PostTemplateDraft {
   const [editorSeed, setEditorSeed] = useState<TiptapContent | ''>('')
 
   const applyTemplate = useCallback((headings: readonly string[] | undefined, currentDoc: Doc) => {
-    if (!isUntouchedTemplate(currentDoc)) return false
+    if (!isUntouchedTemplate(asDoc(currentDoc))) return false
     // A hand-edited settings JSON may hold anything; anything but a string
     // list is "no template" rather than a crash in every composer.
     const safe = Array.isArray(headings) ? headings.filter((h) => typeof h === 'string') : []
@@ -43,10 +46,10 @@ export function usePostTemplateDraft(): PostTemplateDraft {
   }, [])
 
   const insertTemplate = useCallback((headings: readonly string[], currentDoc: Doc) => {
-    setEditorSeed(appendTemplate(currentDoc, headings))
+    setEditorSeed(appendTemplate(asDoc(currentDoc), headings))
   }, [])
 
-  const finalize = useCallback((currentDoc: Doc) => finalizeTemplateDoc(currentDoc), [])
+  const finalize = useCallback((currentDoc: Doc) => finalizeTemplateDoc(asDoc(currentDoc)), [])
   const reset = useCallback(() => setEditorSeed(''), [])
 
   return { editorSeed, applyTemplate, insertTemplate, finalize, reset }
