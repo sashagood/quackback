@@ -199,7 +199,16 @@ export default defineConfig(({ mode }) => {
                 // set into ~200 tiny chunks, each a request on every first
                 // load. `$initial` is rolldown's tag for exactly that set, so
                 // unlike directory pinning it cannot pull a lazy module in.
-                groups: [{ name: 'entry', tags: ['$initial'] }],
+                groups: [
+                  { name: 'entry', tags: ['$initial'] },
+                  // A module shared only by lazy chunks, and too small to be
+                  // worth a round trip, would otherwise become its own chunk
+                  // that every page using those lazy chunks requests. The
+                  // post-template draft hook (392 B gzipped, imported by the
+                  // portal, widget and admin composers) is that case: fold it
+                  // into the entry rather than pay a request per composer page.
+                  { name: 'entry', test: /components\/shared\/use-post-template-draft/ },
+                ],
               },
             },
           },
