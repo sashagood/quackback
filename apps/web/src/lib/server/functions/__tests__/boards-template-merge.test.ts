@@ -21,6 +21,10 @@ describe('updateBoardFn settings handling', () => {
   it('accepts settings.template in its schema', () => {
     expect(src).toMatch(/const boardSettingsSchema[\s\S]*?template:\s*z\.array\(z\.string\(\)\)/)
   })
+  it('accepts a bounded settings.titlePlaceholder and trims it before the merge', () => {
+    expect(src).toMatch(/const boardSettingsSchema[\s\S]*?titlePlaceholder:\s*z\.string\(\)\.max\(/)
+    expect(updateFn).toMatch(/titlePlaceholder[\s\S]*?\.trim\(\)/)
+  })
   it('validates the template with the shared rules', () => {
     expect(updateFn).toMatch(/validateBoardTemplate\(/)
   })

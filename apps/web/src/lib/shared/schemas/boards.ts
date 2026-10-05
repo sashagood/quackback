@@ -119,6 +119,8 @@ export const updateBoardSchema = z.object({
   description: z.string().max(500).optional(),
   /** The post-template textarea, one heading per line; parsed on submit (PRO-529). */
   templateText: z.string().max(2000).optional(),
+  /** Placeholder for the post title field on this board; empty = generic hint. */
+  titlePlaceholder: z.string().max(80).optional(),
 })
 
 export const deleteBoardSchema = z.object({

@@ -109,7 +109,10 @@ const BUGS = {
   id: 'board_bugs',
   name: 'Bugs',
   slug: 'bugs',
-  settings: { template: ['What went wrong?', 'What should happen?'] },
+  settings: {
+    template: ['What went wrong?', 'What should happen?'],
+    titlePlaceholder: 'What went wrong, in one line?',
+  },
 }
 const FEATURES = {
   id: 'board_feat',
@@ -178,6 +181,18 @@ afterEach(() => {
   cleanup()
   editor.values = []
   editor.onDocumentChange = null
+})
+
+describe('portal composer board title placeholder', () => {
+  it('uses the selected board hint and falls back to the generic one', async () => {
+    renderHeader()
+    const title = () => screen.getByRole('textbox', { name: 'Feedback title' }) as HTMLInputElement
+    expect(title().placeholder).toBe('What went wrong, in one line?')
+    typeTitle('D')
+    await screen.findByTestId('editor')
+    fireEvent.click(screen.getByRole('button', { name: 'board:General' }))
+    await waitFor(() => expect(title().placeholder).toBe("What's your idea?"))
+  })
 })
 
 describe('portal composer board template', () => {

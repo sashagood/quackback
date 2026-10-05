@@ -19,6 +19,7 @@ import {
 } from '@/lib/server/domains/boards/board.service'
 import { boardAccessSchema, boardPresetSchema, accessForPreset } from '@/lib/shared/schemas/boards'
 import { validateBoardTemplate } from '@/lib/shared/post-templates'
+import { BOARD_TITLE_PLACEHOLDER_MAX_LENGTH } from '@/lib/shared/db-types'
 import { ValidationError } from '@/lib/shared/errors'
 import { PERMISSIONS } from '@/lib/shared/permissions'
 import { logger } from '@/lib/server/logger'
@@ -58,6 +59,9 @@ const boardSettingsSchema = z
     // PRO-529: H2 question headings prefilled into a new post. Validated by
     // validateBoardTemplate in the handler (count/length rules live there).
     template: z.array(z.string()).optional(),
+    // PRO-529 follow-up: the post title placeholder for this board. Trimmed in
+    // the handler; an empty string clears it (back to the generic hint).
+    titlePlaceholder: z.string().max(BOARD_TITLE_PLACEHOLDER_MAX_LENGTH).optional(),
   })
   .strict()
 
@@ -188,6 +192,10 @@ export const updateBoardFn = createServerFn({ method: 'POST' })
         const parsed = validateBoardTemplate(data.settings.template)
         if (!parsed.ok) throw new ValidationError('VALIDATION_ERROR', parsed.message)
         settingsPatch.template = parsed.value
+      }
+      if (data.settings.titlePlaceholder !== undefined) {
+        // An explicit undefined survives the merge spread and drops the key.
+        settingsPatch.titlePlaceholder = data.settings.titlePlaceholder.trim() || undefined
       }
     }
 

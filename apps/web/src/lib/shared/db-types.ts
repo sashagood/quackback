@@ -47,6 +47,7 @@ export {
   DEFAULT_SETUP_STATE,
   BOARD_TEMPLATE_MAX_HEADINGS,
   BOARD_TEMPLATE_HEADING_MAX_LENGTH,
+  BOARD_TITLE_PLACEHOLDER_MAX_LENGTH,
 } from '@quackback/db/types'
 export type {
   AccessTier,

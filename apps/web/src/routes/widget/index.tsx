@@ -1,7 +1,7 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
 import { z } from 'zod'
-import { readBoardTemplate } from '@/lib/shared/post-templates'
+import { readBoardTemplate, readBoardTitlePlaceholder } from '@/lib/shared/post-templates'
 import {
   lazy,
   Suspense,
@@ -268,6 +268,9 @@ export const Route = createFileRoute('/widget/')({
         // through readBoardTemplate so a hand-edited value is "no template".
         ...(readBoardTemplate(b.settings?.template).length > 0
           ? { template: readBoardTemplate(b.settings?.template) }
+          : {}),
+        ...(readBoardTitlePlaceholder(b.settings?.titlePlaceholder)
+          ? { titlePlaceholder: readBoardTitlePlaceholder(b.settings?.titlePlaceholder) }
           : {}),
       })),
       orgSlug: settings?.slug ?? '',

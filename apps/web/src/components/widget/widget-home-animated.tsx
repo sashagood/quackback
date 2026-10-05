@@ -51,7 +51,7 @@ import type { JSONContent } from '@tiptap/react'
 import type { EditorDocument } from '@/components/ui/rich-text-editor'
 import type { TiptapContent } from '@/lib/shared/schemas/posts'
 import { usePostTemplateDraft } from '@/components/shared/use-post-template-draft'
-import { readBoardTemplate } from '@/lib/shared/post-templates'
+import { readBoardTemplate, readBoardTitlePlaceholder } from '@/lib/shared/post-templates'
 import {
   composeBodyFromPlainText,
   resolveComposeBoardId,
@@ -93,6 +93,8 @@ interface BoardInfo {
   slug: string
   /** H2 question headings prefilled into a new post on this board (PRO-529). */
   template?: string[]
+  /** Title-field hint for this board; absent = the generic widget hint. */
+  titlePlaceholder?: string
 }
 
 export interface WidgetHomeProps {
@@ -287,12 +289,15 @@ function TitleInput({
   title,
   inputRef,
   expanded,
+  placeholder,
   onType,
   onFocus,
 }: {
   title: TitleStore
   inputRef: RefObject<HTMLInputElement | null>
   expanded: boolean
+  /** Per-board hint from the admin's board settings; the generic string when absent. */
+  placeholder?: string
   onType: (value: string) => void
   onFocus: () => void
 }) {
@@ -302,10 +307,13 @@ function TitleInput({
     <m.input
       ref={inputRef}
       type="text"
-      placeholder={intl.formatMessage({
-        id: 'widget.home.input.placeholder',
-        defaultMessage: "What's your idea?",
-      })}
+      placeholder={
+        placeholder ??
+        intl.formatMessage({
+          id: 'widget.home.input.placeholder',
+          defaultMessage: "What's your idea?",
+        })
+      }
       value={value}
       aria-label={intl.formatMessage({
         id: 'widget.home.input.label',
@@ -954,6 +962,7 @@ export function WidgetHomeAnimated({
                 title={title}
                 inputRef={inputRef}
                 expanded={expanded}
+                placeholder={readBoardTitlePlaceholder(selectedBoard?.titlePlaceholder)}
                 onType={(val) => {
                   if (val && !expanded) setExpanded(true)
                   if (!val && expanded && !detailsRef.current?.html().trim()) setExpanded(false)
