@@ -806,6 +806,7 @@ export const runFetchBoardCapabilities = createServerOnlyFn(
         id: String(board.id),
         name: board.name,
         slug: board.slug,
+        template: (board.settings as BoardSettings | null)?.template ?? undefined,
       })),
     }
   }
@@ -818,7 +819,7 @@ export const fetchBoardCapabilitiesFn = createServerFn({ method: 'GET' }).handle
   return runFetchBoardCapabilities(await getOptionalAuth())
 })
 
-export type WidgetVisibleBoard = { id: string; name: string; slug: string }
+export type WidgetVisibleBoard = { id: string; name: string; slug: string; template?: string[] }
 
 // The first page of several columns of one board, under the same filters.
 const getPublicRoadmapColumnsSchema = getPublicRoadmapPostsSchema

@@ -14,9 +14,12 @@ import {
   getBoardById,
   createBoard,
   updateBoard,
+  updateBoardSettings,
   deleteBoard,
 } from '@/lib/server/domains/boards/board.service'
 import { boardAccessSchema, boardPresetSchema, accessForPreset } from '@/lib/shared/schemas/boards'
+import { validateBoardTemplate } from '@/lib/shared/post-templates'
+import { ValidationError } from '@/lib/shared/errors'
 import { PERMISSIONS } from '@/lib/shared/permissions'
 import { logger } from '@/lib/server/logger'
 
@@ -52,6 +55,9 @@ const getBoardSchema = z.object({
 const boardSettingsSchema = z
   .object({
     roadmapStatusIds: z.array(z.string()).optional(),
+    // PRO-529: H2 question headings prefilled into a new post. Validated by
+    // validateBoardTemplate in the handler (count/length rules live there).
+    template: z.array(z.string()).optional(),
   })
   .strict()
 
@@ -175,11 +181,25 @@ export const updateBoardFn = createServerFn({ method: 'POST' })
     log.debug({ board_id: data.id }, 'update board')
     await requireAuth({ permission: PERMISSIONS.BOARD_MANAGE })
 
-    const board = await updateBoard(data.id as BoardId, {
+    let settingsPatch: BoardSettings | undefined
+    if (data.settings !== undefined) {
+      settingsPatch = { ...data.settings } as BoardSettings
+      if (data.settings.template !== undefined) {
+        const parsed = validateBoardTemplate(data.settings.template)
+        if (!parsed.ok) throw new ValidationError('VALIDATION_ERROR', parsed.message)
+        settingsPatch.template = parsed.value
+      }
+    }
+
+    // name/description first; settings are MERGED (customFields, roadmap
+    // statuses survive) rather than replaced through updateBoard().
+    let board = await updateBoard(data.id as BoardId, {
       name: data.name,
       description: data.description,
-      settings: data.settings as BoardSettings | undefined,
     })
+    if (settingsPatch) {
+      board = await updateBoardSettings(data.id as BoardId, settingsPatch)
+    }
 
     log.info({ board_id: board.id }, 'board updated')
     return serializeBoard(board)

@@ -262,6 +262,9 @@ export const Route = createFileRoute('/widget/')({
         id: b.id as string,
         name: b.name,
         slug: b.slug,
+        // Optional-shaped (not `template: undefined`) so this seed stays
+        // assignable to the capabilities query's WidgetVisibleBoard[].
+        ...(b.settings?.template ? { template: b.settings.template } : {}),
       })),
       orgSlug: settings?.slug ?? '',
       // Per-board submit/vote capability for the request actor, server-computed
