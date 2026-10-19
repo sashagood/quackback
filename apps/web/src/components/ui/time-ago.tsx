@@ -1,19 +1,43 @@
 import { useEffect, useRef, useState } from 'react'
-import { formatDistanceToNow } from 'date-fns'
+import { format, formatDistanceToNow } from 'date-fns'
 
 interface TimeAgoProps {
   date: Date | string
   className?: string
 }
 
-/** The relative-time label `<TimeAgo>` renders, for static (no-interval)
- *  consumers like CitationFreshness; '' for a missing or invalid date. */
-export function getTimeAgo(date: Date | string | null | undefined): string {
-  if (!date) return ''
+/**
+ * How long a label stays relative ("3 days ago"). Past this the reader can no
+ * longer place the moment without subtracting, and a relative label dates
+ * nothing precisely, so the label becomes the absolute date instead.
+ */
+const RELATIVE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
+
+function toDate(date: Date | string | null | undefined): Date | null {
+  if (!date) return null
   const d = typeof date === 'string' ? new Date(date) : date
-  // Check for invalid date
-  if (isNaN(d.getTime())) return ''
+  return isNaN(d.getTime()) ? null : d
+}
+
+/** The label `<TimeAgo>` renders, for static (no-interval) consumers like
+ *  CitationFreshness: relative inside the first week ("3 days ago"), the
+ *  absolute date from then on ("20 October 2026"); '' for a missing or
+ *  invalid date. */
+export function getTimeAgo(date: Date | string | null | undefined): string {
+  const d = toDate(date)
+  if (!d) return ''
+  // Elapsed time, not calendar days: date-fns's day difference shifts by one
+  // across a DST change, which would move the cutoff with the viewer's zone.
+  if (Math.abs(Date.now() - d.getTime()) >= RELATIVE_WINDOW_MS) {
+    return format(d, 'd MMMM yyyy')
+  }
   return formatDistanceToNow(d, { addSuffix: true })
+}
+
+/** The full timestamp, shown as the label's tooltip whichever form it takes. */
+export function getFullTimestamp(date: Date | string | null | undefined): string {
+  const d = toDate(date)
+  return d ? format(d, 'd MMMM yyyy, HH:mm') : ''
 }
 
 export function TimeAgo({ date, className }: TimeAgoProps) {
@@ -40,7 +64,13 @@ export function TimeAgo({ date, className }: TimeAgoProps) {
   }, [date])
 
   return (
-    <span key={remount} ref={ref} className={className} suppressHydrationWarning>
+    <span
+      key={remount}
+      ref={ref}
+      className={className}
+      title={getFullTimestamp(date)}
+      suppressHydrationWarning
+    >
       {timeAgo}
     </span>
   )
