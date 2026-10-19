@@ -893,7 +893,7 @@ describe('<CopilotPanel> thumbs feedback', () => {
 
 describe('<CopilotPanel> source freshness line', () => {
   it('shows "Updated … ago" in the source row hovercard when updatedAt is present', async () => {
-    const updatedAt = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString()
+    const updatedAt = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString()
     const frames = aguiRun({
       result: {
         text: 'The refund window is 30 days [1].',
@@ -915,7 +915,7 @@ describe('<CopilotPanel> source freshness line', () => {
     await screen.findByText('1 relevant source')
 
     // Both the citation-dot hovercard and the source-row hovercard carry it.
-    expect(screen.getAllByText(/8 days ago/).length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByText(/3 days ago/).length).toBeGreaterThanOrEqual(1)
     vi.unstubAllGlobals()
   })
 
