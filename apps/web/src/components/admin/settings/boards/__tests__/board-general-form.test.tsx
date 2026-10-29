@@ -32,15 +32,50 @@ beforeEach(() => {
   navigate.mockReset()
 })
 
+async function edit(label: string, value: string) {
+  const field = screen.getByLabelText(label)
+  fireEvent.change(field, { target: { value } })
+  await act(async () => {
+    fireEvent.blur(field)
+  })
+}
+
+describe('<BoardGeneralForm> autosave', () => {
+  it('has no Save button', () => {
+    render(<BoardGeneralForm board={board} />)
+    expect(screen.queryByRole('button', { name: /save/i })).toBeNull()
+  })
+
+  it('saves when a field loses focus after an edit', async () => {
+    render(<BoardGeneralForm board={board} />)
+    await edit('Description', 'Updated description')
+    expect(mutate).toHaveBeenCalledTimes(1)
+    expect(mutate.mock.calls[0]![0]).toEqual({
+      id: board.id,
+      name: 'Bug Reports',
+      description: 'Updated description',
+    })
+  })
+
+  it('does not save when nothing changed', async () => {
+    render(<BoardGeneralForm board={board} />)
+    await act(async () => {
+      fireEvent.blur(screen.getByLabelText('Name'))
+    })
+    expect(mutate).not.toHaveBeenCalled()
+  })
+
+  it('does not save an empty name', async () => {
+    render(<BoardGeneralForm board={board} />)
+    await edit('Name', '')
+    expect(mutate).not.toHaveBeenCalled()
+  })
+})
+
 describe('<BoardGeneralForm> rename navigation', () => {
   it('navigates to the new slug when a rename changes it', async () => {
     render(<BoardGeneralForm board={board} />)
-    fireEvent.change(screen.getByLabelText('Board name'), {
-      target: { value: 'Issue Tracker' },
-    })
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
-    })
+    await edit('Name', 'Issue Tracker')
 
     expect(mutate).toHaveBeenCalledTimes(1)
     const opts = mutate.mock.calls[0]![1] as { onSuccess: (b: { slug: string }) => void }
@@ -58,12 +93,7 @@ describe('<BoardGeneralForm> rename navigation', () => {
 
   it('does not navigate when the slug is unchanged', async () => {
     render(<BoardGeneralForm board={board} />)
-    fireEvent.change(screen.getByLabelText('Description'), {
-      target: { value: 'Updated description' },
-    })
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
-    })
+    await edit('Description', 'Updated description')
 
     const opts = mutate.mock.calls[0]![1] as { onSuccess: (b: { slug: string }) => void }
     act(() => {
@@ -83,10 +113,7 @@ describe('<BoardGeneralForm> post template', () => {
     )
     const field = screen.getByLabelText('Post template') as HTMLTextAreaElement
     expect(field.value).toBe('What went wrong?\nWhat should happen?')
-    fireEvent.change(field, { target: { value: 'What went wrong?\n\n  Steps to reproduce  \n' } })
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
-    })
+    await edit('Post template', 'What went wrong?\n\n  Steps to reproduce  \n')
     expect(mutate).toHaveBeenCalledTimes(1)
     expect(mutate.mock.calls[0]![0]).toMatchObject({
       id: board.id,
@@ -98,19 +125,13 @@ describe('<BoardGeneralForm> post template', () => {
     render(<BoardGeneralForm board={{ ...board, settings: { titlePlaceholder: 'Old hint' } }} />)
     const field = screen.getByLabelText('Title placeholder') as HTMLInputElement
     expect(field.value).toBe('Old hint')
-    fireEvent.change(field, { target: { value: '  What went wrong, in one line?  ' } })
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
-    })
+    await edit('Title placeholder', '  What went wrong, in one line?  ')
     expect(mutate.mock.calls[0]![0]).toMatchObject({
       settings: { titlePlaceholder: 'What went wrong, in one line?' },
     })
 
     mutate.mockReset()
-    fireEvent.change(field, { target: { value: '' } })
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
-    })
+    await edit('Title placeholder', '')
     // Sent as '' (not omitted): JSON drops undefined, and the server clears on ''.
     const sent = mutate.mock.calls[0]![0] as { settings: Record<string, unknown> }
     expect(sent.settings.titlePlaceholder).toBe('')
@@ -127,21 +148,13 @@ describe('<BoardGeneralForm> post template', () => {
 
   it('saves an empty template as no template', async () => {
     render(<BoardGeneralForm board={{ ...board, settings: { template: ['A'] } }} />)
-    fireEvent.change(screen.getByLabelText('Post template'), { target: { value: '' } })
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
-    })
+    await edit('Post template', '')
     expect(mutate.mock.calls[0]![0]).toMatchObject({ settings: { template: [] } })
   })
 
   it('refuses more than 8 headings without calling the server', async () => {
     render(<BoardGeneralForm board={board} />)
-    fireEvent.change(screen.getByLabelText('Post template'), {
-      target: { value: Array.from({ length: 9 }, (_, i) => `H${i}`).join('\n') },
-    })
-    await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
-    })
+    await edit('Post template', Array.from({ length: 9 }, (_, i) => `H${i}`).join('\n'))
     expect(mutate).not.toHaveBeenCalled()
     expect(screen.getByText(/at most 8 headings/)).toBeTruthy()
   })

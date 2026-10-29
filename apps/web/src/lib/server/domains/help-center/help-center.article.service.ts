@@ -17,12 +17,14 @@ import { rehostExternalImages } from '@/lib/server/content/rehost-images'
 import { slugify } from '@/lib/shared/utils/slugify'
 import { uniqueHelpCenterSlug } from './help-center.slug'
 import { deleteRedirectRulesForTarget } from './help-center-redirect-rules.service'
+import { cancelPendingAutoTranslations } from './help-center-translate-jobs'
 import type {
   HelpCenterArticleWithCategory,
   CreateArticleInput,
   UpdateArticleInput,
 } from './help-center.types'
 import { generateArticleEmbedding } from './help-center-embedding.service'
+import { ensureDefaultHelpCategory } from './help-center.default-category'
 import { helpCenterVisibilityConditions } from './help-center-search.service'
 import { resolveUserAvatarUrl } from '@/lib/server/domains/principals/principal-display'
 import { logger } from '@/lib/server/logger'
@@ -218,11 +220,15 @@ export async function createArticle(
     contentType: 'help-center',
     principalId,
   })
+  // No category picked (a first article in an empty help center): file it
+  // under General rather than refusing the save.
+  const categoryId =
+    (input.categoryId?.trim() as KbCategoryId) || (await ensureDefaultHelpCategory())
 
   const [article] = await db
     .insert(helpCenterArticles)
     .values({
-      categoryId: input.categoryId as KbCategoryId,
+      categoryId,
       title,
       // Store the markdown projection of the canonical contentJson so the
       // article list endpoint (which omits contentJson) still serves images.
@@ -360,6 +366,8 @@ export async function deleteArticle(id: KbArticleId): Promise<void> {
   // No DB-level FK on redirect rules (polymorphic target) -- remove any rule
   // pointing at this article explicitly (domains/languages §2).
   await deleteRedirectRulesForTarget('article', id)
+  // Nothing left to translate.
+  await cancelPendingAutoTranslations(id)
 }
 
 export async function restoreArticle(id: KbArticleId): Promise<HelpCenterArticleWithCategory> {

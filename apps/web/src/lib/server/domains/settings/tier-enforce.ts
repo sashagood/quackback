@@ -1,8 +1,18 @@
 import { TierLimitError } from '../../errors/tier-limit-error'
-import { aiTokensThisMonth } from '../ai/usage-counter'
+import { getAiBudgetStatus } from '../ai/ai-budget'
+import { aiAllowance, type AiCreditsState } from '@/lib/shared/billing/ai-credits'
 import { getTierLimits } from './tier-limits.service'
 import type { TierFeatureFlags } from './tier-limits.types'
-import { db, emailSendingDomains, isNull, sql, statusComponents } from '@/lib/server/db'
+import {
+  and,
+  channelAccounts,
+  db,
+  emailSendingDomains,
+  eq,
+  isNull,
+  sql,
+  statusComponents,
+} from '@/lib/server/db'
 
 interface EnforceCountLimitArgs {
   /** Null = unlimited. */
@@ -129,27 +139,79 @@ export async function enforceSendingDomainLimit(
 }
 
 /**
+ * Refuses to create another inbound email route once the plan's
+ * `maxInboundEmailAddresses` limit is reached. Takes a transaction-scoped lock
+ * first, so the count and the insert the caller makes next in the same
+ * transaction cannot interleave with a concurrent creation.
+ */
+export async function enforceInboundEmailAddressLimit(
+  limit: number | null,
+  exec: Pick<typeof db, 'select' | 'execute'>
+): Promise<void> {
+  await exec.execute(sql`SELECT pg_advisory_xact_lock(hashtext('quackback:inbound_route_slot'))`)
+  await enforceCountLimit({
+    limit,
+    name: 'maxInboundEmailAddresses',
+    friendly: 'inbound email addresses',
+    currentCount: async () => {
+      const [row] = await exec
+        .select({ count: sql<number>`count(*)::int` })
+        .from(channelAccounts)
+        .where(
+          and(
+            eq(channelAccounts.role, 'inbound'),
+            eq(channelAccounts.channel, 'email'),
+            isNull(channelAccounts.deletedAt)
+          )
+        )
+      return row?.count ?? 0
+    },
+  })
+}
+
+/**
  * Pre-call gate for any LLM-driven AI service. Refuses when the workspace
- * has used up its monthly token budget. Token usage is recorded after
- * each call by withUsageLogging, so this is a "you're already at/over"
- * check — small overruns are possible if many calls fire concurrently.
+ * has used up its token allowance for the current window (the calendar
+ * month, or the whole trial while one is running; see `ai-budget.ts`).
+ * Token usage is recorded after each call by withUsageLogging, so this is a
+ * "you're already at/over" check: small overruns are possible if many calls
+ * fire concurrently.
  *
  * 0 budget blocks AI entirely. Null = unlimited (the OSS default).
  */
 export async function enforceAiTokenBudget(): Promise<void> {
-  const limits = await getTierLimits()
-  if (limits.aiTokensPerMonth === null) return
-  const used = await aiTokensThisMonth()
-  if (used < limits.aiTokensPerMonth) return
+  const status = await getAiBudgetStatus()
+  if (status.cap === null || !status.exhausted) return
+  const period = status.window.kind === 'trial' ? 'this trial' : 'this month'
   throw new TierLimitError({
     limit: 'aiTokensPerMonth',
-    current: used,
-    max: limits.aiTokensPerMonth,
+    current: status.used,
+    max: status.cap,
     message:
-      limits.aiTokensPerMonth === 0
+      status.cap === 0
         ? 'AI features are not included on your plan. Upgrade to enable them.'
-        : `You've used your AI token budget for this month (${used.toLocaleString()} of ${limits.aiTokensPerMonth.toLocaleString()}). Upgrade to increase it.`,
+        : `AI usage for ${period} is used up. Upgrade your plan for more.`,
   })
+}
+
+/**
+ * Whether AI can run in the current allowance window (the calendar month, or
+ * the whole trial while one runs): no cap, under the cap, none on the plan, or
+ * used up, and when a month's used-up allowance comes back.
+ */
+export async function aiAllowanceNow(): Promise<{
+  credits: AiCreditsState
+  resetsAt: string | null
+  trial: boolean
+}> {
+  const status = await getAiBudgetStatus()
+  return aiAllowance(status.cap, status.used, status.window)
+}
+
+/** True when {@link enforceAiTokenBudget} would not throw. */
+export async function aiBudgetAvailable(): Promise<boolean> {
+  const status = await getAiBudgetStatus()
+  return !status.exhausted
 }
 
 /** True when {@link enforceEmailBudget} would not throw. */
@@ -164,7 +226,11 @@ export async function emailBudgetAvailable(): Promise<boolean> {
   }
 }
 
-/** Pre-compose gate for billable outbound mail. Null = unlimited. */
+/**
+ * Pre-compose gate for broadcast mail (changelog and status-page sends), the
+ * only classes that draw on the monthly allowance. Sign-in, security,
+ * invitation and inbox mail never call this. Null = unlimited.
+ */
 export async function enforceEmailBudget(): Promise<void> {
   const limits = await getTierLimits()
   if (limits.emailsPerMonth === null) return
@@ -178,6 +244,6 @@ export async function enforceEmailBudget(): Promise<void> {
     message:
       limits.emailsPerMonth === 0
         ? 'Outbound email is not included on your plan. Upgrade to enable it.'
-        : `You've reached your email budget for this month (${used.toLocaleString()} of ${limits.emailsPerMonth.toLocaleString()}). Upgrade to increase it.`,
+        : 'Email sending for this month is used up. Upgrade your plan for more.',
   })
 }

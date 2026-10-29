@@ -98,7 +98,7 @@ export function StatusIncidentList({ kind, state, emptyMessage }: StatusIncident
         <AdminListHeader
           searchValue={searchValue}
           onSearchChange={setSearchValue}
-          searchPlaceholder="Search incidents…"
+          searchPlaceholder="Search incidents..."
           sortOptions={[
             { value: 'newest', label: 'Newest' },
             { value: 'impact', label: 'Impact' },
@@ -139,10 +139,7 @@ export function StatusIncidentList({ kind, state, emptyMessage }: StatusIncident
           />
         ) : (
           <div className="p-3">
-            <div
-              data-continuous-list=""
-              className="rounded-xl overflow-hidden shadow-sm divide-y divide-border/50 bg-card border border-border/50"
-            >
+            <div className="overflow-hidden divide-y divide-border/50 border-y border-t-transparent border-border/50">
               {items.map((incident) => (
                 <StatusIncidentRow
                   key={incident.id}
@@ -166,7 +163,7 @@ export function StatusIncidentList({ kind, state, emptyMessage }: StatusIncident
         open={!!deleteTarget}
         onOpenChange={(o) => !o && setDeleteTarget(null)}
         title="Delete incident?"
-        description="This action cannot be undone. The incident and all of its updates will be permanently deleted."
+        description="It will be removed from your status page and incident history. Any services it affects go back to the status set by your other open incidents."
         confirmLabel="Delete"
         variant="destructive"
         isPending={deleteMutation.isPending}

@@ -4,11 +4,12 @@ import { useState } from 'react'
 import { useSuspenseQuery } from '@tanstack/react-query'
 import { adminQueries } from '@/lib/client/queries/admin'
 import { useSavePlatformCredentials, useDeletePlatformCredentials } from '@/lib/client/mutations'
-import { Button } from '@/components/ui/button'
+import { Button, NewTabHint } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { CopyButton } from '@/components/shared/copy-button'
 import type { PlatformCredentialField } from '@/lib/shared/integration-types'
+import { INLINE_LINK } from '@/components/admin/settings/inline-link'
 
 interface PlatformCredentialsFormProps {
   integrationType: string
@@ -99,7 +100,7 @@ export function PlatformCredentialsForm({
               <div key={field.key}>
                 <Label className="text-sm font-medium text-muted-foreground">{field.label}</Label>
                 <div className="mt-1 rounded-md border border-border/50 bg-muted/30 px-3 py-2 text-sm font-mono text-muted-foreground">
-                  {maskedFields?.[field.key] ?? '—'}
+                  {maskedFields?.[field.key] ?? 'Not set'}
                 </div>
               </div>
             ))}
@@ -122,7 +123,7 @@ export function PlatformCredentialsForm({
             <div key={field.key}>
               <Label className="text-sm font-medium text-muted-foreground">{field.label}</Label>
               <div className="mt-1 rounded-md border border-border/50 bg-muted/30 px-3 py-2 text-sm font-mono text-muted-foreground">
-                {maskedFields?.[field.key] ?? '—'}
+                {maskedFields?.[field.key] ?? 'Not set'}
               </div>
             </div>
           ))}
@@ -174,9 +175,10 @@ export function PlatformCredentialsForm({
                 href={field.helpUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="mt-1 inline-block text-xs text-primary hover:underline"
+                className={`${INLINE_LINK} mt-1 inline-block text-xs`}
               >
                 Get credentials from provider
+                <NewTabHint />
               </a>
             )}
           </div>

@@ -1,6 +1,7 @@
 import { CheckCircleIcon } from '@heroicons/react/24/solid'
 import { Avatar } from '@/components/ui/avatar'
-import { TimeAgo, getTimeAgo } from '@/components/ui/time-ago'
+import { TimeAgo } from '@/components/ui/time-ago'
+import { useLocalDateFormatter } from '@/components/ui/local-date'
 import { cn } from '@/lib/shared/utils'
 import { countryName, countryFlag } from '@/lib/shared/country'
 import type { PortalUserListItemView } from '@/lib/shared/types'
@@ -27,7 +28,8 @@ export function UserCard({ user, isSelected, onClick, showCountry = false }: Use
   // Both fields are sanitised in the DTO (`user.service.ts`), so a placeholder
   // is already null by the time it reaches here.
   const displayEmail = user.email ?? user.contactEmail
-  const lastSeenTitle = user.lastSeenAt ? `Last seen ${getTimeAgo(user.lastSeenAt)}` : undefined
+  const formatDate = useLocalDateFormatter()
+  const lastSeenTitle = user.lastSeenAt ? `Last seen ${formatDate(user.lastSeenAt)}` : undefined
 
   return (
     <div
@@ -45,7 +47,7 @@ export function UserCard({ user, isSelected, onClick, showCountry = false }: Use
       {/* Name column */}
       <div className="min-w-0 flex-1 flex items-center gap-1.5">
         <h3 className="font-medium text-sm text-foreground truncate">
-          {user.name || 'Unnamed User'}
+          {user.name || 'Unnamed user'}
         </h3>
         {user.isLead ? (
           <span className="shrink-0 rounded-full border border-border/60 px-1.5 py-px text-[11px] font-medium uppercase tracking-wide text-muted-foreground">

@@ -3,9 +3,6 @@ import { useQuery, useInfiniteQuery } from '@tanstack/react-query'
 import { UsersLayout } from '@/components/admin/users/users-layout'
 import { UsersSegmentNav } from '@/components/admin/users/users-segment-nav'
 import { UsersList } from '@/components/admin/users/users-list'
-import { UserDetail } from '@/components/admin/users/user-detail'
-import { CompaniesView } from '@/components/admin/users/companies-view'
-import { CompanyDetail } from '@/components/admin/users/company-detail'
 import { InvitationsView } from '@/components/admin/users/invitations-view'
 import { useUsersFilters } from '@/components/admin/users/use-users-filters'
 import { usePortalInvites } from '@/components/admin/users/use-portal-invites'
@@ -49,6 +46,18 @@ const NewPersonDialog = lazy(() =>
   import('@/components/admin/users/new-person-dialog').then((m) => ({
     default: m.NewPersonDialog,
   }))
+)
+
+// The page opens on the people list. A person's profile (with its composer and
+// channel icons) and the Companies tab load the first time one is shown.
+const UserDetail = lazy(() =>
+  import('@/components/admin/users/user-detail').then((m) => ({ default: m.UserDetail }))
+)
+const CompaniesView = lazy(() =>
+  import('@/components/admin/users/companies-view').then((m) => ({ default: m.CompaniesView }))
+)
+const CompanyDetail = lazy(() =>
+  import('@/components/admin/users/company-detail').then((m) => ({ default: m.CompanyDetail }))
 )
 
 interface UsersContainerProps {
@@ -144,7 +153,7 @@ export function UsersContainer({ currentMemberRole }: UsersContainerProps) {
 
   // Segment dialog state
   const [createOpen, setCreateOpen] = useState(false)
-  // "New person" (ad-hoc contact) dialog state
+  // "New user" (ad-hoc contact) dialog state
   const [newPersonOpen, setNewPersonOpen] = useState(false)
   const [editTarget, setEditTarget] = useState<SegmentListItem | null>(null)
   // Each dialog mounts on its first open and stays mounted, so closing it
@@ -288,37 +297,41 @@ export function UsersContainer({ currentMemberRole }: UsersContainerProps) {
         {inInvitesMode ? (
           <InvitationsView status={invitesStatus ?? 'pending'} />
         ) : inCompaniesMode ? (
-          selectedCompanyId ? (
-            <CompanyDetail
-              companyId={selectedCompanyId}
-              onClose={() => setSelectedCompanyId(null)}
-              canManage={currentMemberRole === 'admin'}
-            />
-          ) : (
-            <CompaniesView
-              companies={companies}
-              isLoading={isLoadingCompanies}
-              hasMore={!!hasMoreCompanies}
-              isLoadingMore={isLoadingMoreCompanies}
-              onLoadMore={() => fetchMoreCompanies()}
-              totalCount={companyCount}
-              search={filters.search}
-              onSearchChange={(value) => setFilters({ search: value })}
-              companyAttrs={filters.companyAttrs}
-              onCompanyAttrsChange={(encoded) => setFilters({ companyAttrs: encoded })}
-              onSelectCompany={setSelectedCompanyId}
-              canManage={currentMemberRole === 'admin'}
-            />
-          )
+          <Suspense fallback={null}>
+            {selectedCompanyId ? (
+              <CompanyDetail
+                companyId={selectedCompanyId}
+                onClose={() => setSelectedCompanyId(null)}
+                canManage={currentMemberRole === 'admin'}
+              />
+            ) : (
+              <CompaniesView
+                companies={companies}
+                isLoading={isLoadingCompanies}
+                hasMore={!!hasMoreCompanies}
+                isLoadingMore={isLoadingMoreCompanies}
+                onLoadMore={() => fetchMoreCompanies()}
+                totalCount={companyCount}
+                search={filters.search}
+                onSearchChange={(value) => setFilters({ search: value })}
+                companyAttrs={filters.companyAttrs}
+                onCompanyAttrsChange={(encoded) => setFilters({ companyAttrs: encoded })}
+                onSelectCompany={setSelectedCompanyId}
+                canManage={currentMemberRole === 'admin'}
+              />
+            )}
+          </Suspense>
         ) : selectedUserId ? (
-          <UserDetail
-            user={selectedUser ?? null}
-            isLoading={isLoadingUser}
-            onClose={() => setSelectedUserId(null)}
-            onRemoveUser={handleRemoveUser}
-            isRemovePending={removePortalUser.isPending}
-            currentMemberRole={currentMemberRole}
-          />
+          <Suspense fallback={null}>
+            <UserDetail
+              user={selectedUser ?? null}
+              isLoading={isLoadingUser}
+              onClose={() => setSelectedUserId(null)}
+              onRemoveUser={handleRemoveUser}
+              isRemovePending={removePortalUser.isPending}
+              currentMemberRole={currentMemberRole}
+            />
+          </Suspense>
         ) : (
           <UsersList
             users={users}
@@ -343,7 +356,7 @@ export function UsersContainer({ currentMemberRole }: UsersContainerProps) {
         )}
       </UsersLayout>
 
-      {/* New person (ad-hoc contact) dialog */}
+      {/* New user (ad-hoc contact) dialog */}
       {newPersonOpened && (
         <Suspense fallback={null}>
           <NewPersonDialog

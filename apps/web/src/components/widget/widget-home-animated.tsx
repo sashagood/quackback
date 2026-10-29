@@ -60,6 +60,7 @@ import {
   shouldReapplyComposeBoard,
   type WidgetComposeRequest,
 } from './widget-compose'
+import { shownName } from '@/lib/shared/greeting-name'
 
 interface WidgetPost {
   id: string
@@ -136,6 +137,8 @@ interface SearchResult {
 }
 
 const SIMILAR_SEARCH_CACHE_LIMIT = 40
+/** Shorter titles match too much to be similar to anything, as in the portal composer. */
+const SIMILAR_MIN_LENGTH = 5
 let similarSearchCacheVersion = INITIAL_SESSION_VERSION
 const similarSearchCache = new Map<string, SearchResult>()
 
@@ -324,7 +327,7 @@ function TitleInput({
         onType(e.target.value)
       }}
       onFocus={onFocus}
-      className="flex-1 bg-transparent border-0 outline-none text-foreground placeholder:text-muted-foreground/50 placeholder:font-normal caret-primary focus-visible:ring-2 focus-visible:ring-ring/50"
+      className="flex-1 bg-transparent border-0 outline-none text-foreground placeholder:text-muted-foreground/50 placeholder:font-normal caret-primary"
       initial={false}
       animate={{
         fontSize: expanded ? '1rem' : '0.875rem',
@@ -366,7 +369,7 @@ function SimilarIdeas({
   useEffect(() => {
     if (similarDebounceRef.current) clearTimeout(similarDebounceRef.current)
     const q = value.trim()
-    if (!q) {
+    if (q.length < SIMILAR_MIN_LENGTH) {
       setSimilarPostResults(null)
       setIsSimilarSearching(false)
       return
@@ -921,7 +924,7 @@ export function WidgetHomeAnimated({
                     <Select value={selectedBoardId} onValueChange={handleComposeBoardChange}>
                       <SelectTrigger
                         size="xs"
-                        className="border-0 bg-transparent shadow-none font-medium text-foreground hover:text-foreground/80 focus-visible:ring-0"
+                        className="border-0 font-medium text-foreground hover:text-foreground/80 focus-visible:ring-0"
                       >
                         <SelectValue
                           placeholder={intl.formatMessage({
@@ -932,7 +935,7 @@ export function WidgetHomeAnimated({
                       </SelectTrigger>
                       <SelectContent align="start">
                         {boards.map((b) => (
-                          <SelectItem key={b.id} value={b.id} className="py-1">
+                          <SelectItem key={b.id} value={b.id}>
                             {b.name}
                           </SelectItem>
                         ))}
@@ -1082,7 +1085,7 @@ export function WidgetHomeAnimated({
                             values={{
                               name: (
                                 <span className="font-medium text-foreground">
-                                  {user.name || user.email}
+                                  {shownName(user.name, user.email)}
                                 </span>
                               ),
                             }}
@@ -1161,7 +1164,7 @@ export function WidgetHomeAnimated({
                       id: 'widget.home.popular.search.label',
                       defaultMessage: 'Search popular ideas',
                     })}
-                    className="flex-1 min-w-0 h-5 bg-transparent text-xs text-foreground placeholder:text-muted-foreground/50 outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+                    className="flex-1 min-w-0 h-5 bg-transparent text-xs text-foreground placeholder:text-muted-foreground/50 outline-none"
                   />
                   <button
                     type="button"

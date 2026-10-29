@@ -83,12 +83,12 @@ import {
   publishTyping,
 } from '@/lib/server/realtime/conversation-channels'
 import {
-  validateAttachments,
   validateContent,
   preview,
   richMessageFallbackLabel,
   resolveMessageContent,
 } from '@/lib/server/messages/message-core'
+import { resolveAttachments, linkFilesToMessage } from '@/lib/server/domains/files/files.service'
 import {
   notifyVisitorMessage,
   notifyAgentReply,
@@ -128,6 +128,7 @@ import type {
   SendAgentMessageResult,
 } from './conversation.types'
 import { logger } from '@/lib/server/logger'
+import { activeTestOwnerOf, notTestPrincipal, testOwnerOf } from '@/lib/server/test-data'
 
 const log = logger.child({ component: 'conversation' })
 
@@ -299,7 +300,10 @@ export async function sendVisitorMessage(
       ? await resolveVisitorBlockReply(input.conversationId, input.blockReply)
       : null
 
-  const attachments = validateAttachments(input.attachments)
+  const attachments = await resolveAttachments(input.attachments, {
+    principalId: author.principalId,
+    canAttachAnyFile: false,
+  })
   // Rich-composer doc (inline embeds/images): sanitized on write, like the agent
   // path — but no mention extraction (a visitor carries no team @-mentions), and
   // visitor-authored inline images may only reference our own storage. A
@@ -358,6 +362,9 @@ export async function sendVisitorMessage(
     } else {
       const start = canStartConversation(actor)
       if (!start.allowed) throw new ForbiddenError('FORBIDDEN', start.reason)
+      // A test customer's thread goes straight to the teammate trying it out,
+      // never through routing to whoever else is online.
+      const testOwner = await activeTestOwnerOf(author.principalId, tx)
       const [createdConv] = await tx
         .insert(conversations)
         .values({
@@ -365,6 +372,7 @@ export async function sendVisitorMessage(
           channel: 'messenger',
           status: 'open',
           subject: preview(content || fallbackLabel, attachments),
+          ...(testOwner ? { assignedAgentPrincipalId: testOwner } : {}),
         })
         .returning()
       conversation = createdConv
@@ -383,6 +391,7 @@ export async function sendVisitorMessage(
         metadata: messageMetadata,
       })
       .returning()
+    await linkFilesToMessage(tx, attachments, message!.id)
 
     // Capture a pre-chat email once, only when none is recorded yet — a later
     // send can't overwrite an address the visitor already gave.
@@ -481,6 +490,7 @@ export async function sendVisitorMessage(
     contentJson: safeContentJson,
     authorName: authored.supportAuthor.displayName ?? 'A visitor',
     isFirstMessage: created,
+    attachments,
   })
 
   if (created) {
@@ -563,7 +573,10 @@ export async function startAgentConversation(
   // Rich-composer doc (inline embeds/images): sanitized on write like the
   // agent-reply path, but no origin restriction — this message is always
   // agent-authored, never a visitor upload.
-  const attachments = validateAttachments(input.attachments)
+  const attachments = await resolveAttachments(input.attachments, {
+    principalId: agent.principalId,
+    canAttachAnyFile: true,
+  })
   const safeContentJson = input.contentJson ? sanitizeTiptapContent(input.contentJson) : null
   // A text-less rich message is valid only when it carries an inline image or
   // a shared post; this label also backs the subject/preview/notification body.
@@ -635,6 +648,7 @@ export async function startAgentConversation(
         attachments: attachments.length > 0 ? attachments : null,
       })
       .returning()
+    await linkFilesToMessage(tx, attachments, message!.id)
 
     const [updated] = await tx
       .update(conversations)
@@ -675,6 +689,7 @@ export async function startAgentConversation(
     contentJson: safeContentJson,
     agentName: authored.publicAuthor.displayName ?? 'Support',
     messageId: txResult.message.id,
+    attachments,
   })
 
   void emitConversationCreated(actor, agent, txResult.conversation)
@@ -702,7 +717,10 @@ export async function sendAgentMessage(
   const decision = canActAsAgent(actor)
   if (!decision.allowed) throw new ForbiddenError('FORBIDDEN', decision.reason)
 
-  const attachments = validateAttachments(rawAttachments)
+  const attachments = await resolveAttachments(rawAttachments, {
+    principalId: agent.principalId,
+    canAttachAnyFile: true,
+  })
   // Rich-composer doc (inline embeds/images): sanitized on write like the note
   // path, but no mention extraction — replies carry no team @-mentions.
   const safeContentJson = contentJson ? sanitizeTiptapContent(contentJson) : null
@@ -749,6 +767,7 @@ export async function sendAgentMessage(
         metadata: Object.keys(metadata).length > 0 ? metadata : null,
       })
       .returning()
+    await linkFilesToMessage(tx, attachments, message!.id)
 
     const agentNextStatus = applyAgentReopenStatus(
       existing.status,
@@ -831,6 +850,7 @@ export async function sendAgentMessage(
     capturedEmail: txResult.conversation.visitorEmail,
     channel: txResult.conversation.channel,
     messageId: txResult.message.id,
+    attachments,
   })
 
   // isFirstMessage only matters for a VISITOR message — this is an agent
@@ -877,7 +897,10 @@ export async function addAgentNote(
   if (!decision.allowed) throw new ForbiddenError('FORBIDDEN', decision.reason)
   // Same write-side attachment gate as replies: trusted URL + size first,
   // then empty-content is allowed only when a validated attachment remains.
-  const attachmentsValidated = validateAttachments(attachments)
+  const attachmentsValidated = await resolveAttachments(attachments, {
+    principalId: agent.principalId,
+    canAttachAnyFile: true,
+  })
   const noteAttachments = attachmentsValidated.length > 0 ? attachmentsValidated : null
   const content = validateContent(rawContent, attachmentsValidated.length > 0)
 
@@ -906,6 +929,7 @@ export async function addAgentNote(
         metadata,
       })
       .returning()
+    await linkFilesToMessage(tx, attachmentsValidated, inserted!.id)
     // Touch updatedAt only — internal notes don't change the visitor-facing
     // last-message preview/time.
     await tx
@@ -1455,6 +1479,9 @@ export async function routeUnassignedConversation(
 }
 
 async function assignRoutedConversation(conversation: Conversation): Promise<PrincipalId | null> {
+  // Test threads belong to the teammate trying them out; they never take a
+  // colleague's routing slot.
+  if (await testOwnerOf(conversation.visitorPrincipalId)) return null
   const { routeConversation } = await import('./routing')
   const { assignedPrincipalId } = await routeConversation(conversation)
   if (!assignedPrincipalId) return null
@@ -1622,10 +1649,16 @@ export async function requeueUnansweredOnAgentOffline(
   agentPrincipalId: PrincipalId
 ): Promise<void> {
   try {
+    // A test thread stays with the teammate who owns it, online or not.
     const assigned = await db
       .select({ id: conversations.id, status: conversations.status })
       .from(conversations)
-      .where(eq(conversations.assignedAgentPrincipalId, agentPrincipalId))
+      .where(
+        and(
+          eq(conversations.assignedAgentPrincipalId, agentPrincipalId),
+          notTestPrincipal(conversations.visitorPrincipalId)
+        )
+      )
     if (assigned.length === 0) return
 
     // Which of those threads have a real, visitor-facing agent reply (so they

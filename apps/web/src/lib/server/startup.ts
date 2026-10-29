@@ -4,7 +4,8 @@
  */
 import { logger } from '@/lib/server/logger'
 import { getProcessRole, shouldRunWorkers } from './process-role'
-import { config, validateRuntimeConfig } from './config'
+import { config } from './config'
+import { logUnusedRedisUrl } from './unused-env'
 
 const log = logger.child({ component: 'startup' })
 
@@ -93,7 +94,6 @@ export function logStartupBanner(): void {
   if (process.env.QUACKBACK_BUILD === '1') return
 
   if (_logged) return
-  validateRuntimeConfig()
   _logged = true
 
   const runtime =
@@ -113,6 +113,8 @@ export function logStartupBanner(): void {
     },
     'server started'
   )
+
+  logUnusedRedisUrl(log)
 
   // One-shot override: run a named fleet job and exit. The live fleet does
   // not use this — hourly and daily sweeps run on the always-on worker — but
@@ -196,6 +198,15 @@ export function logStartupBanner(): void {
         runFleetPass('sweep', () => runStartupBackfills())
       )
       .catch((err) => log.error({ err }, 'failed to run startup backfills'))
+  }
+
+  // First-run setup token: on an install that still has no admin, either note
+  // that SETUP_TOKEN is live or print a generated one once. Self-hosted only:
+  // a pooled workspace is provisioned for a named owner and never takes one.
+  if (!config.isPooledTenancy) {
+    import('@/lib/server/domains/onboarding/headless-setup')
+      .then(({ ensureBootSetupToken }) => ensureBootSetupToken())
+      .catch((err) => log.error({ err }, 'failed to prepare the first-run setup token'))
   }
 
   // Quackback config file watcher — reconciles managed fields from
@@ -284,6 +295,16 @@ function startBackgroundProcessing(): void {
     )
     .catch((err) => log.error({ err }, 'failed to start telemetry'))
 
+  // One-time copy of files stored before the workspace storage layout into it
+  // (`storage/legacy-relocation.ts`). Single-workspace only: under pooled
+  // tenancy the bucket is shared and a bare key belongs to nobody. Runs in the
+  // background so readiness never waits on a bucket listing.
+  if (!config.isPooledTenancy) {
+    import('@/lib/server/storage/legacy-relocation')
+      .then(({ armLegacyStorageRelocation }) => armLegacyStorageRelocation())
+      .catch((err) => log.error({ err }, 'failed to arm the storage relocation'))
+  }
+
   // The scheduled sweeps. Bodies live in `cron/fleet-jobs.ts` so a one-shot
   // `QUACKBACK_CRON_JOB` run and this timer schedule execute the same code.
   import('@/lib/server/cron/fleet-jobs')
@@ -323,8 +344,11 @@ function startBackgroundProcessing(): void {
       setTimeout(() => void jobs.runStatusMaintenanceSweep(), 31_000)
       setInterval(() => void jobs.runStatusMaintenanceSweep(), 5 * 60 * 1000)
 
-      setTimeout(() => void jobs.runFleetMigratorPass(), 90_000)
-      setInterval(() => void jobs.runFleetMigratorPass(), 60 * 60 * 1000)
+      // Walks the workspace registry, which only exists under pooled tenancy.
+      if (config.isPooledTenancy) {
+        setTimeout(() => void jobs.runFleetMigratorPass(), 90_000)
+        setInterval(() => void jobs.runFleetMigratorPass(), 60 * 60 * 1000)
+      }
 
       log.info({ event: 'sweeps.armed' }, 'scheduled sweeps armed')
     })

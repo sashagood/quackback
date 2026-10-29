@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { XMarkIcon } from '@heroicons/react/24/solid'
+import { PlusIcon, XMarkIcon } from '@heroicons/react/24/solid'
+import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/shared/utils'
@@ -21,12 +22,20 @@ interface FilterChipProps {
   valueId: string
   /** Optional color for a dot indicator */
   color?: string
-  /** Called when the chip's remove button is clicked */
-  onRemove: () => void
+  /**
+   * Called when the chip's remove button is clicked. Omit for an implied chip
+   * (a default the viewer did not pick), which renders dashed with no remove.
+   */
+  onRemove?: () => void
   /** Called when a dropdown option is selected */
   onChange?: (newId: string) => void
   /** Dropdown options (renders a popover when provided with onChange) */
   options?: FilterOption[]
+  /**
+   * Edits the filter in place: clicking the chip opens this instead of the
+   * options list, and it stays open while the viewer changes the filter.
+   */
+  editor?: React.ReactNode
   /**
    * Marks the chip as an internal / team-only filter: amber-accented styling
    * plus (when `tooltip` is set) a hover tooltip. Customers never see these.
@@ -45,6 +54,7 @@ export function FilterChip({
   onRemove,
   onChange,
   options,
+  editor,
   internal = false,
   tooltip,
 }: FilterChipProps) {
@@ -97,10 +107,30 @@ export function FilterChip({
         'transition-colors',
         internal
           ? 'bg-amber-500/10 border border-amber-500/40 hover:border-amber-500/60'
-          : 'bg-muted/60 border border-border/30 hover:border-border/50'
+          : !onRemove
+            ? 'border border-muted-foreground/40 hover:border-muted-foreground'
+            : 'bg-muted/60 border border-border/30 hover:border-border/50'
       )}
     >
-      {hasOptions ? (
+      {editor ? (
+        <Popover open={open} onOpenChange={setOpen}>
+          <PopoverTrigger asChild>
+            <button
+              type="button"
+              className="inline-flex items-center gap-1.5 hover:opacity-70 transition-opacity"
+            >
+              {chipContent}
+            </button>
+          </PopoverTrigger>
+          <PopoverContent
+            align="start"
+            aria-label={label.replace(/:$/, '')}
+            className="w-[340px] max-w-[calc(100vw-2rem)] rounded-xl p-3.5"
+          >
+            <div className="flex max-h-[60vh] flex-wrap gap-1.5 overflow-y-auto">{editor}</div>
+          </PopoverContent>
+        </Popover>
+      ) : hasOptions ? (
         <Popover open={open} onOpenChange={setOpen}>
           <PopoverTrigger asChild>
             <button
@@ -137,19 +167,21 @@ export function FilterChip({
       ) : (
         <span className="inline-flex items-center gap-1">{chipContent}</span>
       )}
-      <button
-        type="button"
-        onClick={onRemove}
-        className={cn(
-          'ml-0.5 p-0.5 rounded-full',
-          'hover:bg-foreground/10',
-          'text-muted-foreground hover:text-foreground',
-          'transition-colors'
-        )}
-        aria-label={`Remove ${label} ${value} filter`}
-      >
-        <XMarkIcon className="h-2.5 w-2.5" />
-      </button>
+      {onRemove && (
+        <button
+          type="button"
+          onClick={onRemove}
+          className={cn(
+            'ml-0.5 p-0.5 rounded-full',
+            'hover:bg-foreground/10',
+            'text-muted-foreground hover:text-foreground',
+            'transition-colors'
+          )}
+          aria-label={`Remove ${label} ${value} filter`}
+        >
+          <XMarkIcon className="h-2.5 w-2.5" />
+        </button>
+      )}
     </div>
   )
 
@@ -163,4 +195,27 @@ export function FilterChip({
   }
 
   return chip
+}
+
+/**
+ * The dashed "+ Filter" control that opens a list's filter menu. It matches the
+ * height and text colour of the other toolbar controls (`SortMenu`, Search).
+ */
+export function FilterAddButton({
+  className,
+  children,
+  ...props
+}: React.ComponentProps<typeof Button>) {
+  return (
+    <Button
+      type="button"
+      variant="outline"
+      size="sm"
+      className={cn('border-dashed font-normal', className)}
+      {...props}
+    >
+      <PlusIcon className="size-3.5" aria-hidden />
+      {children ?? 'Filter'}
+    </Button>
+  )
 }

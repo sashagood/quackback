@@ -11,11 +11,14 @@
 import { describe, it, expect, vi, beforeEach, beforeAll, afterEach } from 'vitest'
 import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { IntlProvider } from 'react-intl'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ConversationId } from '@quackback/ids'
 import type { FeatureFlags } from '@/lib/shared/types/settings'
 import { installInMemoryLocalStorage } from '@/test/local-storage'
 import { aguiRun, structuredDeltas, mockStreamingResponse } from '@/test/agui'
+import en from '@/locales/en.json'
+import { formatViewerDate } from '@/components/ui/local-date'
 
 // Radix Popover/DropdownMenu rely on pointer/layout APIs happy-dom lacks.
 beforeAll(() => {
@@ -86,13 +89,15 @@ function renderPanel(
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const onInsert = props.onInsert ?? vi.fn()
   render(
-    <QueryClientProvider client={client}>
-      <CopilotPanel
-        item={{ kind: 'conversation', id: CONVERSATION_ID }}
-        flags={props.flags ?? ALL_FLAGS_ON}
-        onInsert={onInsert}
-      />
-    </QueryClientProvider>
+    <IntlProvider locale="en" messages={en}>
+      <QueryClientProvider client={client}>
+        <CopilotPanel
+          item={{ kind: 'conversation', id: CONVERSATION_ID }}
+          flags={props.flags ?? ALL_FLAGS_ON}
+          onInsert={onInsert}
+        />
+      </QueryClientProvider>
+    </IntlProvider>
   )
   return { onInsert }
 }
@@ -161,6 +166,8 @@ function proposedActionRow(overrides: Record<string, unknown> = {}) {
     decidedAt: null,
     executedAt: null,
     result: null,
+    argsDigest: 'digest-1',
+    risk: 'medium',
     ...overrides,
   }
 }
@@ -218,7 +225,7 @@ describe('<CopilotPanel> ask -> stream -> answer', () => {
     vi.unstubAllGlobals()
   })
 
-  it('shows a retry affordance on an error response', async () => {
+  it('shows a try again affordance on an error response', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue({
@@ -234,7 +241,7 @@ describe('<CopilotPanel> ask -> stream -> answer', () => {
     await ask('Hello?')
 
     expect(await screen.findByText('The assistant is not configured')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /try again/i })).toBeInTheDocument()
     vi.unstubAllGlobals()
   })
 
@@ -892,8 +899,8 @@ describe('<CopilotPanel> thumbs feedback', () => {
 })
 
 describe('<CopilotPanel> source freshness line', () => {
-  it('shows "Updated … ago" in the source row hovercard when updatedAt is present', async () => {
-    const updatedAt = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString()
+  it('shows "Updated <date>" in the source row hovercard when updatedAt is present', async () => {
+    const updatedAt = '2026-10-20T12:00:00.000Z'
     const frames = aguiRun({
       result: {
         text: 'The refund window is 30 days [1].',
@@ -915,7 +922,9 @@ describe('<CopilotPanel> source freshness line', () => {
     await screen.findByText('1 relevant source')
 
     // Both the citation-dot hovercard and the source-row hovercard carry it.
-    expect(screen.getAllByText(/3 days ago/).length).toBeGreaterThanOrEqual(1)
+    expect(
+      screen.getAllByText(`Updated ${formatViewerDate(updatedAt)}`).length
+    ).toBeGreaterThanOrEqual(1)
     vi.unstubAllGlobals()
   })
 
@@ -1010,7 +1019,7 @@ describe('<CopilotPanel> proposed actions (P2-C.4)', () => {
 
     await waitFor(() =>
       expect(hoisted.approveAssistantActionFn).toHaveBeenCalledWith({
-        data: { pendingActionId: 'assistant_action_1' },
+        data: { pendingActionId: 'assistant_action_1', contentHash: 'digest-1' },
       })
     )
     expect(await screen.findByText('Closed as resolved.')).toBeInTheDocument()
@@ -1038,7 +1047,7 @@ describe('<CopilotPanel> proposed actions (P2-C.4)', () => {
 
     await waitFor(() =>
       expect(hoisted.rejectAssistantActionFn).toHaveBeenCalledWith({
-        data: { pendingActionId: 'assistant_action_1' },
+        data: { pendingActionId: 'assistant_action_1', contentHash: 'digest-1' },
       })
     )
     expect(await screen.findByText('Rejected')).toBeInTheDocument()

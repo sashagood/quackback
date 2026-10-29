@@ -1,29 +1,24 @@
 // @vitest-environment happy-dom
 /**
- * The label is worked out on the server and again as the page hydrates, and
- * the two can straddle a boundary ("59 minutes ago", "about 1 hour ago").
- * That difference must not surface as a hydration error; the label settles
- * on the browser's value once mounted.
+ * The server formats the date in UTC with a fixed locale, and the browser
+ * switches it to the viewer's zone and format once hydrated. That difference
+ * must not surface as a hydration error.
  */
 import { act } from 'react'
 import { hydrateRoot } from 'react-dom/client'
 import { renderToString } from 'react-dom/server'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
+import { formatFirstRenderDate, formatViewerDate } from '../local-date'
 import { TimeAgo } from '../time-ago'
 
-const POSTED = new Date('2026-09-26T10:00:00.000Z')
-
-afterEach(() => vi.useRealTimers())
+const POSTED = new Date('2026-09-26T23:30:00.000Z')
 
 describe('TimeAgo hydration', () => {
-  it('hydrates without error when the label moved on since the server render', async () => {
-    vi.useFakeTimers({ toFake: ['Date'] })
-    vi.setSystemTime(new Date('2026-09-26T10:59:10.000Z'))
+  it('serves the first-render date and hydrates to the viewer date without error', async () => {
     const container = document.createElement('div')
     container.innerHTML = renderToString(<TimeAgo date={POSTED} />)
-    expect(container.textContent).toBe('about 1 hour ago')
+    expect(container.textContent).toBe(formatFirstRenderDate(POSTED))
 
-    vi.setSystemTime(new Date('2026-09-26T11:31:00.000Z'))
     const errors: unknown[] = []
     await act(async () => {
       hydrateRoot(container, <TimeAgo date={POSTED} />, {
@@ -32,6 +27,6 @@ describe('TimeAgo hydration', () => {
     })
 
     expect(errors).toEqual([])
-    expect(container.textContent).toBe('about 2 hours ago')
+    expect(container.textContent).toBe(formatViewerDate(POSTED))
   })
 })

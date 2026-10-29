@@ -1,17 +1,17 @@
 import { useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { createFileRoute } from '@tanstack/react-router'
-import { CreditCardIcon, XMarkIcon } from '@heroicons/react/24/solid'
+import { XMarkIcon } from '@heroicons/react/24/solid'
 import { PERMISSIONS } from '@/lib/shared/permissions'
 import { assertRoutePermission } from '@/lib/shared/route-permission'
-import { BackLink } from '@/components/ui/back-link'
-import { PageHeader } from '@/components/shared/page-header'
+import { SettingsPage } from '@/components/admin/settings/settings-page'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { BillingSettings } from '@/components/admin/settings/billing/billing-settings'
 import { billingQueries } from '@/lib/client/queries/billing'
 import { checkoutSuccessCopy } from '@/lib/shared/billing/checkout-flash'
 import { cn } from '@/lib/shared/utils'
 import { useBillingEnabled } from '@/lib/client/hooks/use-root-context'
+import { adminPageHead } from '@/lib/client/admin-head'
 
 const BILLING_ERROR_COPY: Record<string, string> = {
   seats_below_usage: 'Pick at least as many seats as people you already have.',
@@ -20,7 +20,6 @@ const BILLING_ERROR_COPY: Record<string, string> = {
   over_plan_limits: 'Remove anything that is over the new plan before switching.',
   already_on_plan: 'You are already on this plan.',
   already_on_addon: 'Branding removal is already on this workspace.',
-  price_changed: 'The pack price just changed. Check the new price and try again.',
   not_on_addon: 'Branding removal is not on this workspace.',
   unavailable: 'That billing action is not available right now.',
   invalid: 'That billing request was not valid. Try again from this page.',
@@ -38,6 +37,7 @@ const BILLING_ERROR_COPY: Record<string, string> = {
  * workspaces therefore have no navigation item or commercial dependency.
  */
 export const Route = createFileRoute('/admin/settings/billing')({
+  head: adminPageHead('Billing settings'),
   validateSearch: (search: Record<string, unknown>) => ({
     checkout:
       search.checkout === 'success' || search.checkout === 'cancelled'
@@ -79,15 +79,7 @@ function BillingPage() {
   }, [search.checkout, navigate])
 
   return (
-    <div className="space-y-6 max-w-5xl">
-      <div className="lg:hidden">
-        <BackLink to="/admin/settings">Settings</BackLink>
-      </div>
-      <PageHeader
-        icon={CreditCardIcon}
-        title="Plans & billing"
-        description="Manage your plan and billing history here."
-      />
+    <SettingsPage page="/admin/settings/billing" width="wide">
       {search.checkout === 'success' ? (
         <CheckoutSuccessFlash
           onDismiss={() => navigate({ search: clearBillingFlash, replace: true })}
@@ -108,10 +100,10 @@ function BillingPage() {
         <BillingSettings />
       ) : (
         <p className="text-sm text-muted-foreground">
-          Plan and billing is available only in a Quackback Cloud workspace.
+          Plan and billing are not enabled for this workspace.
         </p>
       )}
-    </div>
+    </SettingsPage>
   )
 }
 
@@ -135,9 +127,7 @@ function BillingFlash(props: {
   return (
     <Alert
       variant={props.tone === 'error' ? 'destructive' : 'default'}
-      className={cn(
-        props.tone === 'success' && 'border-emerald-500/30 bg-emerald-500/10 text-foreground'
-      )}
+      className={cn(props.tone === 'success' && 'border-success/30 bg-success/10 text-foreground')}
     >
       <AlertTitle>{props.title}</AlertTitle>
       <AlertDescription>{props.body}</AlertDescription>

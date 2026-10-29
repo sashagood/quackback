@@ -323,6 +323,25 @@ export const account = pgTable(
   ]
 )
 
+/**
+ * The name and avatar URL an identity provider last wrote to an account's
+ * user, each kept only while the user's stored value still equals it. Profile
+ * sync on sign-in refreshes a recorded field and never one a person chose.
+ *
+ * A table of its own rather than columns on `account`: Better-Auth's adapter
+ * selects every `account` column, so a column there would fail every sign-in
+ * on a database that has not applied its migration yet. Nothing in Better-Auth
+ * reads this table. See 0292.
+ */
+export const accountProfileSync = pgTable('account_profile_sync', {
+  accountId: typeIdColumn('account')('account_id')
+    .primaryKey()
+    .references(() => account.id, { onDelete: 'cascade' }),
+  name: text('name'),
+  image: text('image'),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+})
+
 export const verification = pgTable(
   'verification',
   {
@@ -495,8 +514,10 @@ export const settings = pgTable('settings', {
   featureFlags: text('feature_flags'),
   /**
    * Inbound spam-filter configuration (JSON)
-   * Structure: { trustedSenders: string[] } — exact addresses or domains
-   * whose inbound messages bypass spam classification entirely.
+   * Structure: { trustedSenders: string[], aiClassifier: boolean }.
+   * trustedSenders: exact addresses or domains whose inbound messages bypass
+   * spam classification entirely. aiClassifier: whether new conversations go
+   * to the AI classifier (absent reads as on).
    */
   spamFilterConfig: text('spam_filter_config'),
   /**
@@ -573,19 +594,36 @@ export const settings = pgTable('settings', {
 /** Where identity may be read from, in resolver order. */
 export type IdentitySource = 'idToken' | 'userinfo' | 'accessTokenJwt'
 
-/** Profile fields a claim can be bound to. */
-export type ProfileField = 'id' | 'email' | 'name'
+/**
+ * Profile fields a claim can be bound to. `username` has no column of its
+ * own: it names the account when the provider sends no display name. `image`
+ * is the avatar, read as an http(s) URL.
+ */
+export type ProfileField = 'id' | 'email' | 'name' | 'username' | 'image'
 
 /**
  * Role-mapping rules applied to an OIDC claim at sign-in. Now the `role`
  * section of {@link IdentityProviderClaimMapping}; the shape is unchanged from
  * the former `attribute_mapping` column so migrated rows behave identically.
  */
+/** One role rule: when the claim contains a value, grant a role. */
+export type ClaimRoleRule = {
+  whenContains: string
+  role: 'admin' | 'member' | 'user'
+  /**
+   * A workspace role (custom or preset) granted on top of the `member` tier,
+   * the same way a custom-role invite or role change rides it. Only valid with
+   * `role: 'member'`. A matched rule naming a role that no longer exists
+   * grants nothing and leaves the person's role as it is.
+   */
+  roleId?: string
+}
+
 export type ClaimRoleMapping = {
   /** Dotted path or namespaced claim on the ID token. */
   claimPath: string
   /** First-match-wins role assignment from the resolved claim. */
-  rules: Array<{ whenContains: string; role: 'admin' | 'member' | 'user' }>
+  rules: ClaimRoleRule[]
   /** When true, every sign-in re-resolves and may demote/promote. */
   syncOnEverySignIn?: boolean
 }
@@ -601,12 +639,15 @@ export type ClaimRoleMapping = {
  * this is interpreted.
  */
 export type IdentityProviderClaimMapping = {
-  /** Which claim carries the account id, the email, the display name. */
+  /** Which claim carries the account id, the email, the display name, the
+   *  username and the avatar. */
   profile?: {
     sources?: IdentitySource[]
-    claims?: { id?: string; email?: string; name?: string }
+    claims?: Partial<Record<ProfileField, string>>
     /** Mint a placeholder address when the provider supplies no email. */
     allowMissingEmail?: boolean
+    /** Refresh the name and avatar from the provider on every sign-in. */
+    syncOnSignIn?: boolean
   }
   role?: ClaimRoleMapping
   /** Claim to user-attribute copying. */
@@ -870,6 +911,7 @@ export const principal = pgTable(
     companyId: typeIdColumnNullable('company')('company_id').references(() => companies.id, {
       onDelete: 'set null',
     }),
+    testOwnerPrincipalId: typeIdColumnNullable('principal')('test_owner_principal_id'),
     // Blocking (support platform §4.6). `blocked_at` = when the person was
     // blocked (null = not blocked, the enforcement flag); `blocked_by_principal_id`
     // = the team actor who blocked them. The FK is self-referential and set-null
@@ -879,6 +921,14 @@ export const principal = pgTable(
     blockedByPrincipalId: typeIdColumnNullable('principal')('blocked_by_principal_id'),
   },
   (table) => [
+    foreignKey({
+      name: 'principal_test_owner_principal_id_principal_id_fk',
+      columns: [table.testOwnerPrincipalId],
+      foreignColumns: [table.id],
+    }).onDelete('cascade'),
+    uniqueIndex('principal_test_owner_idx')
+      .on(table.testOwnerPrincipalId)
+      .where(sql`test_owner_principal_id IS NOT NULL`),
     // Self-referential blocking actor FK; named to match the SQL migration.
     foreignKey({
       name: 'principal_blocked_by_principal_id_principal_id_fk',
@@ -1197,6 +1247,40 @@ export const oauthClientAssertion = pgTable('oauth_client_assertion', {
   id: text('id').primaryKey(),
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
 })
+
+/**
+ * Device authorization grant (RFC 8628): a pending device sign-in, bound to the
+ * OAuth client and resources it asked for. Written and consumed by Better
+ * Auth's device-authorization plugin.
+ */
+export const deviceCode = pgTable(
+  'device_code',
+  {
+    id: text('id').primaryKey(),
+    deviceCode: text('device_code').notNull(),
+    userCode: text('user_code').notNull(),
+    userId: typeIdColumnNullable('user')('user_id'),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    status: text('status').notNull(),
+    lastPolledAt: timestamp('last_polled_at', { withTimezone: true }),
+    pollingInterval: integer('polling_interval'),
+    clientId: text('client_id'),
+    scope: text('scope'),
+    resources: text('resources').array(),
+    oauthClientId: text('oauth_client_id'),
+  },
+  (table) => [
+    foreignKey({
+      name: 'device_code_user_id_fkey',
+      columns: [table.userId],
+      foreignColumns: [user.id],
+    }).onDelete('cascade'),
+    uniqueIndex('device_code_device_code_idx').on(table.deviceCode),
+    uniqueIndex('device_code_user_code_idx').on(table.userCode),
+    index('device_code_user_id_idx').on(table.userId),
+    index('device_code_expires_at_idx').on(table.expiresAt),
+  ]
+)
 
 // Relations for Drizzle relational queries (enables experimental joins)
 export const userRelations = relations(user, ({ many }) => ({

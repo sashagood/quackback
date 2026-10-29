@@ -110,14 +110,14 @@ export type {
 } from './types'
 export { CORE_THEME_VARIABLES } from './types'
 
-export type { MinimalThemeVariables, MinimalThemeConfig, ThemeBaseline } from './expand'
+export type { MinimalThemeVariables, MinimalThemeConfig } from './expand'
 export {
   expandTheme,
   extractMinimal,
   unbrandedTheme,
   DEFAULT_FONT_SANS,
-  REFINED_DARK_BASE,
-  REFINED_LIGHT_BASE,
+  DEFAULT_DARK_BASE,
+  DEFAULT_LIGHT_BASE,
   parseOklch,
   formatOklch,
   adjustHue,
@@ -125,7 +125,9 @@ export {
   generateChartColors,
 } from './expand'
 
-export { themePresets, presetNames, primaryPresetIds, getPreset } from './presets'
+// The presets are not re-exported here: building them runs at import time, so
+// a barrel re-export would put every palette in the entry chunk. The branding
+// screens import them from './presets' directly.
 
 export { hexToOklch, oklchToHex, isValidHex, isValidOklch } from './colors'
 

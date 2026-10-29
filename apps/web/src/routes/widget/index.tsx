@@ -308,12 +308,10 @@ export const Route = createFileRoute('/widget/')({
       assistant:
         messengerTabEnabled && settings?.publicWidgetConfig?.messenger?.assistant?.enabled
           ? {
-              name: settings.publicWidgetConfig.messenger.assistant.name?.trim() || 'Quinn',
+              name: settings.publicWidgetConfig.messenger.assistant.name?.trim() || 'Quackback AI',
               avatarUrl: settings.publicWidgetConfig.messenger.assistant.avatarUrl || null,
             }
           : null,
-      linkPreviews:
-        (settings?.featureFlags as { supportInbox?: boolean } | undefined)?.supportInbox ?? false,
       defaultBoard: settings?.publicWidgetConfig?.defaultBoard,
       portalAccess: {
         isPrivate: settings?.publicPortalConfig?.portalAccess?.isPrivate ?? false,
@@ -423,7 +421,6 @@ function WidgetPage() {
     orgSlug,
     boardPermissions,
     tabs,
-    linkPreviews,
     defaultBoard,
     portalAccess,
     portalOrigin,
@@ -438,7 +435,6 @@ function WidgetPage() {
   } = Route.useLoaderData()
   const { board: initialBoardSlug } = Route.useSearch()
   const { ensureSession, sessionVersion } = useWidgetAuth()
-  const intl = useIntl()
 
   // The loader seeds boardPermissions for the anonymous SSR baseline (no Bearer
   // at loader time). Refetch it for the REAL actor with the widget's Bearer
@@ -484,6 +480,9 @@ function WidgetPage() {
   const [conversationTarget, setConversationTarget] = useState<ConversationId | 'new' | null>(
     resumeConversationId ? (resumeConversationId as ConversationId) : null
   )
+  // A host's `open({ view: 'chat', body })`. The nonce remounts the messenger
+  // so a draft sent while it is already open still lands in the composer.
+  const [messengerDraft, setMessengerDraft] = useState<{ nonce: number; body: string } | null>(null)
   // Manual size preference: the header's expand/collapse button flips this,
   // and it is STICKY — collapsing turns auto-expansion off for every later
   // item view until the visitor expands again. Persisted per browser.
@@ -671,6 +670,10 @@ function WidgetPage() {
           setView('help')
           break
         case 'messenger':
+          if (command.body) {
+            const body = command.body
+            setMessengerDraft((prev) => ({ nonce: (prev?.nonce ?? 0) + 1, body }))
+          }
           openMessenger()
           break
         case 'tickets':
@@ -873,18 +876,6 @@ function WidgetPage() {
   // the assistant identity when enabled — always available, no presence — or
   // the live presence badge for assistant-less workspaces.
   const presence = useConversationPresence(messengerEnabled && !assistant)
-  // When office hours are configured, tell the visitor up front when the team
-  // is back — the thread body only says so once they've typed.
-  const presenceBackAt = useMemo(() => {
-    if (!presence.nextOpenAt) return null
-    const at = new Date(presence.nextOpenAt)
-    if (Number.isNaN(at.getTime())) return null
-    return new Intl.DateTimeFormat(intl.locale, {
-      weekday: 'long',
-      hour: 'numeric',
-      minute: '2-digit',
-    }).format(at)
-  }, [presence.nextOpenAt, intl.locale])
   const messengerHeader =
     view === 'messenger' ? (
       assistant ? (
@@ -906,7 +897,10 @@ function WidgetPage() {
         <div className="min-w-0 ps-1">
           <ConversationPresenceBadge
             available={conversationAvailable(presence.agentsOnline, presence.withinOfficeHours)}
-            backAt={presenceBackAt}
+            // When office hours are configured, the badge tells the visitor up
+            // front when the team is back; the thread body only says so once
+            // they have typed.
+            nextOpenAt={presence.nextOpenAt}
           />
         </div>
       )
@@ -994,11 +988,11 @@ function WidgetPage() {
           fallback={<WidgetMessengerViewSkeleton isNew={conversationTarget === 'new'} />}
         >
           <WidgetMessenger
-            key={conversationTarget ?? 'active'}
+            key={`${conversationTarget ?? 'active'}:${messengerDraft?.nonce ?? 0}`}
+            initialDraft={messengerDraft?.body}
             helpEnabled={tabs.help}
             onArticleSelect={handleHelpArticleSelect}
             conversationTarget={conversationTarget === null ? undefined : conversationTarget}
-            linkPreviews={linkPreviews}
             // A fresh thread exists to be typed into; a resumed one to be read.
             // Mobile hosts skip it — the software keyboard would cover the thread.
             autofocusComposer={conversationTarget === 'new' && !hostIsMobile}

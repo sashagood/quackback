@@ -3,6 +3,7 @@
  * categories), and soft delete.
  */
 
+import { PERMISSIONS } from '@/lib/shared/permissions'
 import { z } from 'zod'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import {
@@ -123,6 +124,7 @@ type DeleteChangelogArgs = { changelogId: string }
 export function registerChangelogTools(server: McpServer, auth: McpAuthContext) {
   registerTool<CreateChangelogArgs>(server, auth, {
     name: 'create_changelog',
+    permissions: [PERMISSIONS.CHANGELOG_MANAGE],
     description: `Create a changelog entry. Saves as draft by default; set publish: true to publish immediately.
 
 Examples:
@@ -164,6 +166,7 @@ Examples:
 
   registerTool<UpdateChangelogArgs>(server, auth, {
     name: 'update_changelog',
+    permissions: [PERMISSIONS.CHANGELOG_MANAGE],
     description: `Update title, content, publish state, categories, and/or linked posts on an existing changelog entry.
 
 Examples:
@@ -216,6 +219,7 @@ Examples:
 
   registerTool<DeleteChangelogArgs>(server, auth, {
     name: 'delete_changelog',
+    permissions: [PERMISSIONS.CHANGELOG_MANAGE],
     description: `Soft-delete a changelog entry. This cannot be undone via the API.
 
 Examples:

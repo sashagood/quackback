@@ -33,6 +33,8 @@ import { resolveSubmitState } from '@/components/public/feedback/submit-permissi
 import { PUBLIC_FEEDBACK_EDITOR_FEATURES } from '@/components/public/feedback/feedback-editor-features'
 import type { EditorDocument } from '@/components/ui/rich-text-editor'
 import { useSessionContext } from '@/lib/client/hooks/use-root-context'
+import { shownName } from '@/lib/shared/greeting-name'
+import { TITLE_MAX_LENGTH } from './feedback-header'
 
 interface BoardOption {
   id: string
@@ -54,7 +56,15 @@ export interface FeedbackHeaderProps {
    */
   boardPermissions?: Record<string, { canSubmit: boolean; canVote: boolean }>
   onPostCreated?: (postId: string, boardSlug: string) => void
+  /**
+   * Opens the composer with this title, for example from a search that found
+   * nothing. A new `key` opens it again with the same title.
+   */
+  draft?: { title: string; key: number }
 }
+
+/** The server's limits for a new post's title and details (createPublicPostSchema). */
+const DETAILS_MAX_LENGTH = 10_000
 
 export function FeedbackHeaderAnimated({
   boards,
@@ -62,6 +72,7 @@ export function FeedbackHeaderAnimated({
   user,
   boardPermissions,
   onPostCreated,
+  draft,
 }: FeedbackHeaderProps) {
   const intl = useIntl()
   const router = useRouter()
@@ -77,9 +88,10 @@ export function FeedbackHeaderAnimated({
 
   // Identified users post as themselves; anonymous posting is handled separately.
   const isAnonymousSession = session?.user?.principalType === 'anonymous'
+  const anonymousName = isAnonymousSession ? session?.user?.displayName?.trim() || null : null
   const effectiveUser =
     session?.user && !isAnonymousSession
-      ? { name: session.user.name, email: session.user.email }
+      ? { name: shownName(session.user.name, session.user.email), email: session.user.email }
       : user
   const { upload: uploadMedia } = usePortalMediaUpload()
   const uploadMediaWithSession = useCallback(
@@ -125,15 +137,24 @@ export function FeedbackHeaderAnimated({
   const selectedBoard = boards.find((b) => b.id === selectedBoardId)
   const boardCustomFields = selectedBoard?.settings?.customFields ?? []
 
-  // The board's post template (PRO-529). `draft.editorSeed` is the editor's
+  // The board's post template (PRO-529). `templateDraft.editorSeed` is the editor's
   // controlled value; it only changes when a board is picked over an untouched
   // body or the author asks for the template to be inserted. The header does
   // not re-render on keystrokes, so whether to offer "Insert template" is
   // decided when the board changes, from the body as it is then.
-  const draft = usePostTemplateDraft()
+  const templateDraft = usePostTemplateDraft()
   const [showInsertTemplate, setShowInsertTemplate] = useState(false)
   // Read through readBoardTemplate: a hand-edited settings JSON is "no template".
   const selectedTemplate = readBoardTemplate(selectedBoard?.settings?.template)
+  // A draft handed in (a search that found nothing) opens the composer with
+  // that title, in view.
+  useEffect(() => {
+    if (!draft) return
+    title.set(draft.title.slice(0, TITLE_MAX_LENGTH))
+    setExpanded(true)
+    titleInputRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    titleInputRef.current?.focus({ preventScroll: true })
+  }, [draft, title])
 
   // Focus title input when form expands
   useEffect(() => {
@@ -147,7 +168,7 @@ export function FeedbackHeaderAnimated({
   // Seed the body from the preselected board each time the form opens.
   useEffect(() => {
     if (!expanded) return
-    draft.applyTemplate(selectedTemplate, detailsRef.current?.json() ?? null)
+    templateDraft.applyTemplate(selectedTemplate, detailsRef.current?.json() ?? null)
     // oxlint-disable-next-line react-hooks/exhaustive-deps -- seed once per expand
   }, [expanded])
 
@@ -210,6 +231,20 @@ export function FeedbackHeaderAnimated({
       }
     }
 
+    // The server refuses longer details, and retrying would not change that.
+    if ((detailsRef.current?.markdown().length ?? 0) > DETAILS_MAX_LENGTH) {
+      setError(
+        intl.formatMessage(
+          {
+            id: 'portal.feedback.header.errorDetailsTooLong',
+            defaultMessage: 'Keep the details under {max} characters.',
+          },
+          { max: intl.formatNumber(DETAILS_MAX_LENGTH) }
+        )
+      )
+      return
+    }
+
     try {
       if (!effectiveUser && canPostAnonymously) {
         const ok = await ensureAnonSession()
@@ -224,16 +259,16 @@ export function FeedbackHeaderAnimated({
         }
       }
 
-      // Untouched template sections are dropped; a body of only headings is
-      // sent as no body. `undefined`, not null: createPublicPostSchema's
-      // contentJson is `.optional()` and rejects null.
+      // Untouched template sections are dropped; a body of only headings, no
+      // details written, or the editor not mounted yet means no document: the
+      // post carries its title alone.
       const details = detailsRef.current
-      const finalJson = draft.finalize(details?.json() ?? null)
+      const finalJson = templateDraft.finalize(details?.json() ?? null)
       const result = await createPost.mutateAsync({
         boardId: selectedBoardId as BoardId,
         title: typedTitle.trim(),
         content: finalJson ? (details?.markdown() ?? '') : '',
-        contentJson: finalJson ?? undefined,
+        ...(finalJson ? { contentJson: finalJson } : {}),
         ...(boardCustomFields.length > 0 ? { customFields: customFieldValues } : {}),
       })
 
@@ -256,14 +291,14 @@ export function FeedbackHeaderAnimated({
           },
         }
       )
-    } catch (err) {
+    } catch {
+      // The server logs why it refused the post; its message is not written
+      // for the visitor.
       setError(
-        err instanceof Error
-          ? err.message
-          : intl.formatMessage({
-              id: 'portal.feedback.header.errorSubmit',
-              defaultMessage: 'Failed to submit feedback',
-            })
+        intl.formatMessage({
+          id: 'portal.feedback.header.errorSubmit',
+          defaultMessage: 'Could not submit your feedback. Please try again.',
+        })
       )
     }
   }
@@ -273,7 +308,7 @@ export function FeedbackHeaderAnimated({
     title.set('')
     detailsRef.current = null
     setCustomFieldValues({})
-    draft.reset()
+    templateDraft.reset()
     setShowInsertTemplate(false)
     setError('')
   }
@@ -320,7 +355,10 @@ export function FeedbackHeaderAnimated({
                 // The new board's template replaces an untouched body; a dirty
                 // body is kept and the template is offered instead.
                 const next = readBoardTemplate(boards.find((b) => b.id === id)?.settings?.template)
-                const replaced = draft.applyTemplate(next, detailsRef.current?.json() ?? null)
+                const replaced = templateDraft.applyTemplate(
+                  next,
+                  detailsRef.current?.json() ?? null
+                )
                 setShowInsertTemplate(!replaced && next.length > 0)
               }}
             />
@@ -390,7 +428,7 @@ export function FeedbackHeaderAnimated({
             >
               <Suspense fallback={<RichTextEditorPlaceholder minHeight="150px" />}>
                 <LazyRichTextEditor
-                  value={draft.editorSeed}
+                  value={templateDraft.editorSeed}
                   onDocumentChange={handleContentChange}
                   placeholder={intl.formatMessage({
                     id: 'portal.feedback.header.detailsPlaceholder',
@@ -414,7 +452,10 @@ export function FeedbackHeaderAnimated({
                   type="button"
                   className="mt-1 text-xs text-primary hover:underline"
                   onClick={() => {
-                    draft.insertTemplate(selectedTemplate, detailsRef.current?.json() ?? null)
+                    templateDraft.insertTemplate(
+                      selectedTemplate,
+                      detailsRef.current?.json() ?? null
+                    )
                     setShowInsertTemplate(false)
                   }}
                 >
@@ -462,6 +503,25 @@ export function FeedbackHeaderAnimated({
                     defaultMessage="You don't have access to post on this board"
                   />
                 </p>
+              ) : isAnonymousSession && canPostAnonymously ? (
+                // A visitor who never signed in posts under their generated
+                // name, and has nothing to sign out of.
+                <p className="text-xs text-muted-foreground">
+                  {anonymousName ? (
+                    <>
+                      <FormattedMessage
+                        id="portal.feedback.header.postingAs"
+                        defaultMessage="Posting as"
+                      />{' '}
+                      <span className="font-medium text-foreground">{anonymousName}</span>
+                    </>
+                  ) : (
+                    <FormattedMessage
+                      id="portal.feedback.header.postingAnonymously"
+                      defaultMessage="Posting anonymously"
+                    />
+                  )}
+                </p>
               ) : effectiveUser ? (
                 <p className="text-xs text-muted-foreground">
                   <FormattedMessage
@@ -469,7 +529,7 @@ export function FeedbackHeaderAnimated({
                     defaultMessage="Posting as"
                   />{' '}
                   <span className="font-medium text-foreground">
-                    {effectiveUser.name || effectiveUser.email}
+                    {shownName(effectiveUser.name, effectiveUser.email)}
                   </span>
                   {' ('}
                   <button
@@ -583,6 +643,7 @@ function TitleInput({
     <motion.input
       ref={inputRef}
       type="text"
+      maxLength={TITLE_MAX_LENGTH}
       placeholder={
         placeholder ??
         intl.formatMessage({
@@ -600,7 +661,7 @@ function TitleInput({
         if (!expanded) onExpand()
       }}
       onFocus={() => !expanded && onExpand()}
-      className="flex-1 bg-transparent border-0 outline-none text-foreground font-semibold placeholder:text-muted-foreground/60 placeholder:font-normal caret-primary focus-visible:ring-2 focus-visible:ring-ring/50"
+      className="flex-1 bg-transparent border-0 outline-none text-foreground font-semibold placeholder:text-muted-foreground/60 placeholder:font-normal caret-primary"
       initial={false}
       animate={{
         fontSize: expanded ? '1.25rem' : '1rem',

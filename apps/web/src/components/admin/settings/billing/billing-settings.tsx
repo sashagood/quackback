@@ -1,3 +1,4 @@
+import { useIntl } from 'react-intl'
 import { useEffect, useState } from 'react'
 import { useQuery, useQueryClient, useSuspenseQuery } from '@tanstack/react-query'
 import { ArrowTopRightOnSquareIcon } from '@heroicons/react/24/solid'
@@ -6,13 +7,14 @@ import type { BillingCatalogue, CustomerInvoice } from '@/lib/server/control-pla
 import { billingQueries, cancelPlanDowngradeFn } from '@/lib/client/queries/billing'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
+import { Button, NewTabHint } from '@/components/ui/button'
 import { Progress } from '@/components/ui/progress'
+import { useFormatNumber } from '@/components/ui/format-number'
+import { useLocalDateFormatter, type LocalDateFormatter } from '@/components/ui/local-date'
 import { ConfirmDialog } from '@/components/shared/confirm-dialog'
 import { cn } from '@/lib/shared/utils'
 import { formatUsd } from '@/lib/shared/format-usd'
 import { annualSavingsLabel } from '@/lib/shared/billing/checkout-path'
-import { hasTopUpPackPrice } from './topup-price'
 import {
   billingPlanAction,
   catalogueTrialDays,
@@ -23,10 +25,10 @@ import {
 import { daysUntil } from '@/lib/shared/billing/trial-state'
 import { checkoutPath } from '@/lib/shared/billing/checkout-path'
 import { SubscribeDialog } from './subscribe-dialog'
-import { TopUpDialog } from './topup-dialog'
 import { UsageMeter } from './usage-meter'
 import { TrialExpiredBilling } from './trial-expired-billing'
 import { PlanDowngradeDialog } from './free-downgrade-dialog'
+import { INLINE_LINK } from '@/components/admin/settings/inline-link'
 
 /** Workspace-local presentation of the control-plane billing projection. */
 export function BillingSettings() {
@@ -67,7 +69,6 @@ export function BillingPlansView(props: {
   pending?: { planId: string; planName: string } | null
 }) {
   const [period, setPeriod] = useState<'monthly' | 'annual'>('annual')
-  const [topupMeter, setTopupMeter] = useState<'ai' | 'email' | null>(null)
   const [subscribePlanId, setSubscribePlanId] = useState<PaidPlanId | null>(null)
   const [pendingOpen, setPendingOpen] = useState(Boolean(props.pending?.planId))
   const { overview, catalogue } = props
@@ -104,12 +105,7 @@ export function BillingPlansView(props: {
       ) : null}
       <CurrentPlanCard overview={overview} catalogue={catalogue} onSubscribe={setSubscribePlanId} />
 
-      <UsageCard
-        overview={overview}
-        catalogue={catalogue}
-        usage={props.usage ?? []}
-        onTopUp={setTopupMeter}
-      />
+      <UsageCard overview={overview} usage={props.usage ?? []} />
 
       <section className="space-y-4">
         <div className="flex flex-wrap items-end justify-between gap-3">
@@ -136,7 +132,7 @@ export function BillingPlansView(props: {
         {catalogue && (
           <div
             data-settings-card=""
-            className="grid grid-cols-1 overflow-hidden rounded-xl border border-border/50 bg-card sm:grid-cols-2 xl:grid-cols-4"
+            className="grid grid-cols-1 overflow-hidden rounded-xl border bg-card sm:grid-cols-2 xl:grid-cols-4"
           >
             {catalogue.plans.map((plan, index) => (
               <PlanCard
@@ -189,15 +185,6 @@ export function BillingPlansView(props: {
           }}
         />
       ) : null}
-      {topupMeter ? (
-        <TopUpDialog
-          open
-          meter={topupMeter}
-          onOpenChange={(open) => {
-            if (!open) setTopupMeter(null)
-          }}
-        />
-      ) : null}
       {props.pending && pendingOpen ? (
         <PlanDowngradeDialog
           open
@@ -247,6 +234,7 @@ function CurrentPlanCard(props: {
   onSubscribe: (planId: PaidPlanId) => void
 }) {
   const { overview, catalogue } = props
+  const format = useLocalDateFormatter()
   const purchased = overview.seats?.purchased ?? null
   const showSeats = purchased != null
   const trialPlanName =
@@ -275,29 +263,26 @@ function CurrentPlanCard(props: {
         : daysLeft === 0
           ? ' (ends today)'
           : ` (${daysLeft} ${daysLeft === 1 ? 'day' : 'days'} left)`
-    renewalBits.push(`Trial ends ${formatDate(overview.trialExpiresAt)}${left}`)
+    renewalBits.push(`Trial ends ${formatDate(format, overview.trialExpiresAt)}${left}`)
   } else if (overview.trialEnded && overview.trialExpiresAt) {
     renewalBits.push(
       trialPlanName
-        ? `Your ${trialPlanName} trial ended ${formatDate(overview.trialExpiresAt)}. Everything you built is still here.`
-        : `Your trial ended ${formatDate(overview.trialExpiresAt)}. Everything you built is still here.`
+        ? `Your ${trialPlanName} trial ended ${formatDate(format, overview.trialExpiresAt)}. Everything you built is still here.`
+        : `Your trial ended ${formatDate(format, overview.trialExpiresAt)}. Everything you built is still here.`
     )
   } else if (overview.cancellationAt) {
-    renewalBits.push(`Paid through ${formatDate(overview.cancellationAt)}`)
+    renewalBits.push(`Paid through ${formatDate(format, overview.cancellationAt)}`)
   } else if (overview.renewalAt) {
-    renewalBits.push(`Renews ${formatDate(overview.renewalAt)}`)
+    renewalBits.push(`Renews ${formatDate(format, overview.renewalAt)}`)
   }
   return (
-    <section
-      data-settings-card=""
-      className="overflow-hidden rounded-xl border border-border/50 bg-card"
-    >
+    <section data-settings-card="" className="overflow-hidden rounded-xl border bg-card">
       <div className="flex items-start justify-between gap-3 px-6 py-5">
         <div className="min-w-0 space-y-1">
           <div className="flex items-center gap-2">
             <h2 className="text-base font-semibold">{overview.planName}</h2>
             {statusLabel ? (
-              <Badge size="sm" shape="pill" variant="secondary">
+              <Badge size="sm" variant="secondary">
                 {statusLabel}
               </Badge>
             ) : null}
@@ -423,10 +408,10 @@ function usageMeterDescription(key: string): string | undefined {
 
 function UsageCard(props: {
   overview: BillingProjectionOverview
-  catalogue: BillingCatalogue | null
   usage: Array<{ key: string; label: string; used: number; limit: number | null }>
-  onTopUp: (meter: 'ai' | 'email') => void
 }) {
+  const format = useLocalDateFormatter()
+  const intl = useIntl()
   const emails = props.usage.find((line) => line.key === 'emailsPerMonth')
   const api = props.usage.find((line) => line.key === 'apiRequestsPerMonth')
   const inventory = props.usage.filter(
@@ -436,24 +421,28 @@ function UsageCard(props: {
       line.key !== 'emailsPerMonth' &&
       line.key !== 'apiRequestsPerMonth'
   )
+  const formatNumber = useFormatNumber()
   const ai = props.overview.ai
-  const canTopUp = props.overview.canManageBilling
   const hasAi = ai != null && (ai.includedCents > 0 || ai.extraCents > 0)
   const hasEmails = emails != null && emails.limit != null
   const hasApi = api != null && api.limit != null
   if (!hasAi && !hasEmails && !hasApi && inventory.length === 0) return null
 
-  const reset = nextMonthResetLabel()
+  const reset = nextMonthResetLabel(format)
+  // A trial's AI allowance runs to the trial end, not the calendar month.
+  const aiReset = ai?.resetsAt
+    ? intl.formatMessage(
+        { id: 'admin.billing.aiResets', defaultMessage: 'Resets {date}' },
+        { date: format(new Date(ai.resetsAt), { month: 'short', day: 'numeric' }) }
+      )
+    : null
   const aiCap = ai ? (ai.includedCents > 0 ? ai.includedCents : ai.extraCents) : 0
   const aiUsed = ai ? Math.min(ai.usedCents, aiCap) : 0
   const aiPercent = aiCap > 0 ? Math.min(100, Math.round((aiUsed / aiCap) * 100)) : 0
-  const hasMonthly = hasAi || hasEmails || hasApi
+  const hasMonthly = (hasAi && !aiReset) || hasEmails || hasApi
 
   return (
-    <section
-      data-settings-card=""
-      className="overflow-hidden rounded-xl border border-border/50 bg-card"
-    >
+    <section data-settings-card="" className="overflow-hidden rounded-xl border bg-card">
       <div className="flex items-center justify-between border-b border-border/50 px-6 py-4">
         <h2 className="text-base font-semibold">Usage</h2>
         {hasMonthly ? (
@@ -464,27 +453,18 @@ function UsageCard(props: {
         {hasAi && ai ? (
           <div className="px-6 py-4">
             <UsageMeter
-              label="Quinn usage"
-              description={
+              label="AI usage"
+              description={[
                 ai.extraCents > 0
                   ? 'Included usage is used first, then extra credit.'
-                  : 'Included usage this period.'
-              }
+                  : 'Included usage this period.',
+                aiReset,
+              ]
+                .filter(Boolean)
+                .join(' ')}
               valueText={`${aiPercent}% used this period`}
               used={aiUsed}
               limit={aiCap}
-              action={
-                canTopUp && hasTopUpPackPrice(props.catalogue?.aiTopUpPackCents) ? (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onClick={() => props.onTopUp('ai')}
-                  >
-                    Top up
-                  </Button>
-                ) : null
-              }
             />
           </div>
         ) : null}
@@ -493,23 +473,10 @@ function UsageCard(props: {
             <UsageMeter
               label="Emails"
               description={usageMeterDescription('emailsPerMonth')}
-              valueText={`${emails.used.toLocaleString()} of ${emails.limit.toLocaleString()}`}
+              valueText={`${formatNumber(emails.used)} of ${formatNumber(emails.limit)}`}
               used={emails.used}
               limit={emails.limit}
-              action={
-                canTopUp &&
-                emails.limit != null &&
-                hasTopUpPackPrice(props.catalogue?.emailTopUpPackCents) ? (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onClick={() => props.onTopUp('email')}
-                  >
-                    Top up
-                  </Button>
-                ) : null
-              }
+              note={emails.used >= emails.limit ? <EmailsPausedNotice resetsOn={reset} /> : null}
             />
           </div>
         ) : null}
@@ -518,7 +485,7 @@ function UsageCard(props: {
             <UsageMeter
               label="API requests"
               description={usageMeterDescription('apiRequestsPerMonth')}
-              valueText={`${api.used.toLocaleString()} of ${api.limit.toLocaleString()}`}
+              valueText={`${formatNumber(api.used)} of ${formatNumber(api.limit)}`}
               used={api.used}
               limit={api.limit}
             />
@@ -530,7 +497,7 @@ function UsageCard(props: {
               <UsageMeter
                 label={usageMeterLabel(line)}
                 description={usageMeterDescription(line.key)}
-                valueText={`${line.used.toLocaleString()} of ${line.limit.toLocaleString()}`}
+                valueText={`${formatNumber(line.used)} of ${formatNumber(line.limit)}`}
                 used={line.used}
                 limit={line.limit}
               />
@@ -540,6 +507,26 @@ function UsageCard(props: {
       </div>
     </section>
   )
+}
+
+/** The line under the emails meter once the month's allowance is used up. */
+export function EmailsPausedNotice(props: { resetsOn: string | null }) {
+  const intl = useIntl()
+  const text = props.resetsOn
+    ? intl.formatMessage(
+        {
+          id: 'admin.billing.emailsPausedUntilResetDate',
+          defaultMessage:
+            'Changelog and status page emails are paused until your allowance resets on {date}. Sign-in and support emails still send.',
+        },
+        { date: props.resetsOn }
+      )
+    : intl.formatMessage({
+        id: 'admin.billing.emailsPausedUntilReset',
+        defaultMessage:
+          'Changelog and status page emails are paused until your allowance resets. Sign-in and support emails still send.',
+      })
+  return <>{text}</>
 }
 
 function AddOnsCard(props: {
@@ -557,10 +544,7 @@ function AddOnsCard(props: {
   return (
     <section className="space-y-3">
       <h2 className="text-base font-semibold">Add-ons</h2>
-      <div
-        data-settings-card=""
-        className="overflow-hidden rounded-xl border border-border/50 bg-card"
-      >
+      <div data-settings-card="" className="overflow-hidden rounded-xl border bg-card">
         <div className="flex items-center justify-between gap-3 px-4 py-3">
           <div className="min-w-0">
             <div className="text-[13px] font-medium">Remove Quackback branding</div>
@@ -594,11 +578,11 @@ function AddOnsCard(props: {
   )
 }
 
-function nextMonthResetLabel(): string {
-  const date = new Date()
-  date.setUTCDate(1)
-  date.setUTCMonth(date.getUTCMonth() + 1)
-  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+/** The calendar-month meters reset at 00:00 UTC on the 1st, so name that day in UTC. */
+function nextMonthResetLabel(format: LocalDateFormatter): string {
+  const now = new Date()
+  const reset = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1))
+  return format(reset, { month: 'short', day: 'numeric', timeZone: 'UTC' })
 }
 
 function PlanCard(props: {
@@ -633,7 +617,7 @@ function PlanCard(props: {
           <div className="flex flex-wrap items-center gap-1.5">
             <h3 className="text-sm font-semibold">{plan.name}</h3>
             {props.trialActive ? (
-              <Badge size="sm" shape="pill" variant="secondary">
+              <Badge size="sm" variant="secondary">
                 Trial
               </Badge>
             ) : null}
@@ -643,9 +627,10 @@ function PlanCard(props: {
             href="https://quackback.io/pricing"
             target="_blank"
             rel="noreferrer"
-            className="mt-1 inline-flex items-center gap-1 text-[13px] text-primary hover:underline"
+            className={`${INLINE_LINK} mt-1 inline-flex items-center gap-1 text-[13px]`}
           >
             View & compare features
+            <NewTabHint />
           </a>
         </div>
         <p className="shrink-0 text-right">
@@ -833,6 +818,7 @@ function PeriodToggle(props: {
 }
 
 function InvoiceList({ invoices }: { invoices: CustomerInvoice[] }) {
+  const format = useLocalDateFormatter()
   return (
     <ul
       data-settings-card=""
@@ -842,7 +828,7 @@ function InvoiceList({ invoices }: { invoices: CustomerInvoice[] }) {
         <li key={invoice.id} className="flex items-center gap-3 px-4 py-2.5 text-[13px]">
           <span className="min-w-0 flex-1 truncate font-medium">{invoice.number ?? 'Invoice'}</span>
           <span className="hidden text-muted-foreground sm:inline">
-            {formatDate(invoice.createdAt)}
+            {formatDate(format, invoice.createdAt)}
           </span>
           <span className="tabular-nums">{formatUsd(invoice.amountCents, 2)}</span>
           <span className="hidden capitalize text-muted-foreground md:inline">
@@ -879,9 +865,7 @@ function PortalButton(props: { label: string }) {
   )
 }
 
-function formatDate(iso: string): string {
-  const date = new Date(iso)
-  return Number.isNaN(date.getTime())
-    ? iso
-    : date.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
+/** e.g. "Oct 1, 2026"; a value that is not a date reads as given. */
+function formatDate(format: LocalDateFormatter, iso: string): string {
+  return format(iso, { year: 'numeric', month: 'short', day: 'numeric' }) || iso
 }

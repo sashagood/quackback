@@ -3,6 +3,9 @@ import { RadioGroup as RadioGroupPrimitive } from '@base-ui/react/radio-group'
 
 import { cn } from '@/lib/shared/utils'
 
+/** Dot colour for a radio inside a selected-tile fill, where the primary dot would vanish. */
+export const RADIO_TILE_DOT = '[&_div]:bg-foreground'
+
 function RadioGroup({ className, ...props }: RadioGroupPrimitive.Props) {
   return (
     <RadioGroupPrimitive
@@ -18,7 +21,7 @@ function RadioGroupItem({ className, ...props }: Radio.Root.Props) {
     <Radio.Root
       data-slot="radio-group-item"
       className={cn(
-        'border-input text-primary focus-visible:border-ring focus-visible:ring-ring/50 aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive aspect-square size-4 shrink-0 rounded-full border shadow-xs transition-shadow outline-none focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-50',
+        'border-input text-primary focus-visible:border-ring focus-visible:ring-ring aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive aspect-square size-4 shrink-0 rounded-full border shadow-xs transition-shadow outline-none focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-50',
         className
       )}
       {...props}

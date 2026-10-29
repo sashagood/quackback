@@ -23,6 +23,8 @@ import { resolveCloudConfig } from '@/lib/server/domains/settings/cloud/cloud.se
 import { logger } from '@/lib/server/logger'
 import { runWithoutLogContext } from '@/lib/server/log-context'
 import { shouldRunWorkers } from '@/lib/server/process-role'
+import { getCurrentWorkspace } from '@/lib/server/workspaces/workspace-context'
+import { analyticsWorkspaceKey } from '@/lib/shared/analytics-identity'
 
 const log = logger.child({ component: 'bootstrap' })
 
@@ -81,6 +83,25 @@ export interface BootstrapData {
    * Gates the Settings Domains row. False on every self-hosted install.
    */
   cloudEnabled: boolean
+  /**
+   * Browser product analytics for the admin app, present only when the
+   * operator set `POSTHOG_KEY`. `workspaceId` is the opaque group key the
+   * admin events and this workspace's instance ping share
+   * (see analytics-identity.ts).
+   */
+  productAnalytics: {
+    key: string
+    /** Where the SDK sends: PostHog, or a reverse proxy in front of it. */
+    apiHost: string
+    /** The PostHog app, for toolbar links; null when it cannot be known. */
+    uiHost: string | null
+    sessionRecording: boolean
+    /** Replays hide every text node, not only inputs. */
+    maskText: boolean
+    /** Replays hide every input value, not only passwords. */
+    maskInputs: boolean
+    workspaceId: string | null
+  } | null
 }
 
 // Returns both the session (with principalType) AND the user role from one
@@ -131,6 +152,9 @@ async function getSessionAndRole(): Promise<{
           emailVerified: session.user.emailVerified,
           image: session.user.image ?? null,
           principalType: (principalRecord?.type as PrincipalType) ?? 'user',
+          ...(principalRecord?.type === 'anonymous'
+            ? { displayName: principalRecord.displayName ?? null }
+            : {}),
           createdAt: session.user.createdAt.toISOString(),
           updatedAt: session.user.updatedAt.toISOString(),
         },
@@ -281,6 +305,20 @@ const getBootstrapDataInternal = createServerOnlyFn(async (): Promise<BootstrapD
     updateBannerDismissedVersion,
     billingEnabled: cloud.enabled && (cloud.canUpgrade || cloud.canManageBilling),
     cloudEnabled: cloud.enabled,
+    productAnalytics: config.productAnalytics
+      ? {
+          key: config.productAnalytics.key,
+          apiHost: config.productAnalytics.host,
+          uiHost: config.productAnalytics.uiHost,
+          sessionRecording: config.productAnalytics.sessionRecording,
+          maskText: config.productAnalytics.maskText,
+          maskInputs: config.productAnalytics.maskInputs,
+          workspaceId: await analyticsWorkspaceKey(
+            getCurrentWorkspace()?.workspaceKey,
+            typeof settings?.settings?.id === 'string' ? settings.settings.id : null
+          ),
+        }
+      : null,
   }
 })
 

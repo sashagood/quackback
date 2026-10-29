@@ -24,13 +24,16 @@ import {
 // Re-export types only to keep this module client-safe.
 export type * from '@quackback/db/types'
 
-// Plain-data constants from @quackback/db/types are also safe (no runtime side
-// effects) and let client code stay aligned with the schema defaults.
+// Plain-data constants (and the pure resolvers beside them) from
+// @quackback/db/types are also safe (no runtime side effects) and let client
+// code stay aligned with the schema defaults.
 export {
   ACCESS_TIERS,
   ACCESS_TIER_RANK,
   DEFAULT_BOARD_ACCESS,
   MODERATION_RULE_VALUES,
+  REPLY_POLICIES,
+  resolveReplyPolicy,
   CONVERSATION_STATUSES,
   CONVERSATION_END_REASONS,
   CONVERSATION_SPAM_FILED_BY,
@@ -48,12 +51,17 @@ export {
   BOARD_TEMPLATE_MAX_HEADINGS,
   BOARD_TEMPLATE_HEADING_MAX_LENGTH,
   BOARD_TITLE_PLACEHOLDER_MAX_LENGTH,
+  APPROVAL_RISKS,
+  APPROVAL_REQUEST_CHANNELS,
+  APPROVAL_DECISION_CHANNELS,
+  APPROVAL_EXECUTION_STATES,
 } from '@quackback/db/types'
 export type {
   AccessTier,
   Channel,
   BoardAccess,
   ModerationRuleValue,
+  ReplyPolicy,
   ConversationEndReason,
   ConversationSpamFiledBy,
   TeamAssignmentMethod,
@@ -66,6 +74,7 @@ export type {
   IdentitySource,
   ProfileField,
   ClaimRoleMapping,
+  ClaimRoleRule,
   IdentityProviderClaimMapping,
   SourceSnapshot,
   SourceUnavailableReason,
