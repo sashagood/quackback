@@ -88,6 +88,14 @@ describe('<UserCard>', () => {
         onClick={vi.fn()}
       />
     )
-    expect(screen.getByTitle(/Last seen/)).toBeInTheDocument()
+    const cell = screen.getByTitle(/Last seen/)
+    expect(cell).toHaveTextContent(/2026/)
+    // A title on an inner element would win on hover and hide this one.
+    expect(cell.querySelector('[title]')).toBeNull()
+  })
+
+  it('titles the joined date with its full timestamp when the user was never seen', () => {
+    render(<UserCard user={USER} isSelected={false} onClick={vi.fn()} />)
+    expect(screen.getByTitle(/1\/1\/2026/)).toHaveTextContent('1/1/2026')
   })
 })

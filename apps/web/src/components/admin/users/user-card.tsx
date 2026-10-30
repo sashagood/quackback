@@ -1,7 +1,6 @@
 import { CheckCircleIcon } from '@heroicons/react/24/solid'
 import { Avatar } from '@/components/ui/avatar'
-import { TimeAgo } from '@/components/ui/time-ago'
-import { useLocalDateFormatter } from '@/components/ui/local-date'
+import { NUMERIC_DATE_TIME, useLocalDateFormatter } from '@/components/ui/local-date'
 import { cn } from '@/lib/shared/utils'
 import { countryName, countryFlag } from '@/lib/shared/country'
 import type { PortalUserListItemView } from '@/lib/shared/types'
@@ -16,6 +15,29 @@ export const EMAIL_COLUMN_WIDTH = 'w-48'
 export const JOINED_COLUMN_WIDTH = 'w-36'
 export const COUNTRY_COLUMN_WIDTH = 'w-32'
 
+/**
+ * The Joined date, with when the user was last seen as its tooltip (the full
+ * join timestamp for someone never seen). A leaf of its own: the formatter
+ * switches to the viewer's format once hydrated, and called from the row it
+ * re-rendered every row with its avatar and badges.
+ */
+function JoinedDate({
+  joinedAt,
+  lastSeenAt,
+}: {
+  joinedAt: Date | string
+  lastSeenAt: Date | string | null
+}) {
+  const format = useLocalDateFormatter()
+  return (
+    <span
+      title={lastSeenAt ? `Last seen ${format(lastSeenAt)}` : format(joinedAt, NUMERIC_DATE_TIME)}
+    >
+      {format(joinedAt)}
+    </span>
+  )
+}
+
 interface UserCardProps {
   user: PortalUserListItemView
   isSelected: boolean
@@ -28,8 +50,6 @@ export function UserCard({ user, isSelected, onClick, showCountry = false }: Use
   // Both fields are sanitised in the DTO (`user.service.ts`), so a placeholder
   // is already null by the time it reaches here.
   const displayEmail = user.email ?? user.contactEmail
-  const formatDate = useLocalDateFormatter()
-  const lastSeenTitle = user.lastSeenAt ? `Last seen ${formatDate(user.lastSeenAt)}` : undefined
 
   return (
     <div
@@ -78,9 +98,7 @@ export function UserCard({ user, isSelected, onClick, showCountry = false }: Use
           'shrink-0 whitespace-nowrap text-xs text-muted-foreground'
         )}
       >
-        <span title={lastSeenTitle}>
-          <TimeAgo date={new Date(user.joinedAt)} />
-        </span>
+        <JoinedDate joinedAt={user.joinedAt} lastSeenAt={user.lastSeenAt} />
       </div>
 
       {/* Country column — opt-in via the list's column picker */}
