@@ -49,16 +49,25 @@ function TooltipTrigger({
   )
 }
 
+/**
+ * `anchor` positions the popup against an element other than a trigger: one
+ * controlled tooltip can then serve many plain elements (e.g. the 90 days of
+ * a status uptime bar) instead of each carrying its own trigger.
+ */
 function TooltipContent({
   className,
   sideOffset = 6,
   side = 'top',
   align = 'center',
   alignOffset = 0,
+  anchor,
   children,
   ...props
 }: TooltipPrimitive.Popup.Props &
-  Pick<TooltipPrimitive.Positioner.Props, 'align' | 'alignOffset' | 'side' | 'sideOffset'>) {
+  Pick<
+    TooltipPrimitive.Positioner.Props,
+    'align' | 'alignOffset' | 'anchor' | 'side' | 'sideOffset'
+  >) {
   // Nothing to portal until the tooltip first opens.
   const opened = useOverlayOpened()
   if (!opened) return null
@@ -69,14 +78,15 @@ function TooltipContent({
         sideOffset={sideOffset}
         align={align}
         alignOffset={alignOffset}
+        anchor={anchor}
         className="isolate z-50"
       >
         <TooltipPrimitive.Popup
           data-slot="tooltip-content"
           className={cn(
             'z-50 px-2.5 py-1.5 text-xs font-medium',
-            'bg-zinc-900 text-zinc-50 dark:bg-zinc-800 dark:text-zinc-100',
-            'rounded-md shadow-md dark:shadow-zinc-950/50',
+            'bg-popover text-popover-foreground',
+            'rounded-[0.375rem] border border-border shadow-md',
             'origin-(--transform-origin)',
             'data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95',
             'data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95',

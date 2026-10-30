@@ -13,6 +13,58 @@ import {
 } from '@/lib/shared/billing/plan-action'
 import { FreeDowngradeDialog } from './free-downgrade-dialog'
 import { SubscribeDialog } from './subscribe-dialog'
+import { INLINE_LINK } from '@/components/admin/settings/inline-link'
+import { LocalDate } from '@/components/ui/local-date'
+import { CHOICE_DUE_FORMAT } from '@/components/admin/plan-notice-choice-due'
+import { TRIAL_CHOICE_GATE_FROM, TRIAL_CHOICE_GRACE_MS } from '@/lib/shared/billing/trial-state'
+import { useHydrated } from '@tanstack/react-router'
+
+/**
+ * What happened and what is being asked. Billing managers land here from every
+ * admin page once the grace period is over, so this says why, and what opens
+ * the rest of admin again. Whether the grace is still running depends on the
+ * viewer's clock, so that sentence waits for hydration rather than flashing.
+ */
+function TrialChoiceLead(props: {
+  trialPlanName: string | null
+  trialExpiresAt: string | null
+  choseFree: boolean
+}) {
+  const hydrated = useHydrated()
+  const expires = props.trialExpiresAt ? Date.parse(props.trialExpiresAt) : Number.NaN
+  const dueAt = Number.isNaN(expires)
+    ? null
+    : new Date(Math.max(expires + TRIAL_CHOICE_GRACE_MS, TRIAL_CHOICE_GATE_FROM))
+  const graceLeft = hydrated && dueAt !== null && dueAt.getTime() > Date.now()
+  const name = props.trialPlanName
+  return (
+    <div className="space-y-1.5">
+      <h2 className="text-base font-semibold">
+        {name ? `Your ${name} trial has ended` : 'Your trial has ended'}
+      </h2>
+      <p className="text-sm text-muted-foreground">
+        {props.choseFree
+          ? "You chose Free. Remove what's over Free's limits, then confirm the switch."
+          : `Choose how this workspace continues: ${name ? `keep ${name}` : 'pick a paid plan'}, or switch to Free once anything over Free's limits is removed. Everything you built is still here.`}
+      </p>
+      {hydrated ? (
+        <p className="text-sm text-muted-foreground">
+          {dueAt && graceLeft ? (
+            <>
+              The rest of admin stays open until{' '}
+              <LocalDate date={dueAt} options={CHOICE_DUE_FORMAT} locale="en-US" />. After that it
+              waits until a plan is chosen.
+            </>
+          ) : props.choseFree ? (
+            'Until you switch, only this page and the pages that fix those limits are open.'
+          ) : (
+            'The rest of admin opens again as soon as you choose a plan.'
+          )}
+        </p>
+      ) : null}
+    </div>
+  )
+}
 
 export function TrialExpiredBilling(props: {
   overview: BillingProjectionOverview
@@ -35,14 +87,14 @@ export function TrialExpiredBilling(props: {
   const plans = catalogue?.plans ?? []
   const selected = plans.find((plan) => plan.id === selectedId)
   const paidSelected = selected && selected.id !== 'free' ? selected : null
-  const trialName = overview.trialPlanName ?? 'your plan'
 
   return (
     <div className="space-y-6">
-      <p className="text-sm text-muted-foreground">
-        Need more time to test everything? Pick a plan below, including Free after you remove
-        anything that exceeds it.
-      </p>
+      <TrialChoiceLead
+        trialPlanName={overview.trialPlanName ?? null}
+        trialExpiresAt={overview.trialExpiresAt}
+        choseFree={props.pending?.planId === 'free'}
+      />
 
       <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_20rem]">
         <div className="space-y-5">
@@ -66,10 +118,7 @@ export function TrialExpiredBilling(props: {
             </p>
           ) : null}
 
-          <div
-            data-settings-card=""
-            className="overflow-hidden rounded-xl border border-border/50 bg-card"
-          >
+          <div data-settings-card="" className="overflow-hidden rounded-xl border bg-card">
             {plans.map((plan) => {
               const action = billingPlanAction(plan.id, overview, trialedPlanIds)
               const isCurrent = overview.trialPlanId
@@ -94,7 +143,7 @@ export function TrialExpiredBilling(props: {
                     <div className="flex flex-wrap items-center gap-1.5">
                       <span className="text-sm font-semibold">{plan.name}</span>
                       {isCurrent ? (
-                        <Badge size="sm" shape="pill" variant="secondary">
+                        <Badge size="sm" variant="secondary">
                           Current
                         </Badge>
                       ) : null}
@@ -102,7 +151,7 @@ export function TrialExpiredBilling(props: {
                     <p className="mt-1 text-[13px] text-muted-foreground">{plan.bestFor}</p>
                     {plan.id === 'free' ? (
                       <span
-                        className="mt-2 inline-flex text-[13px] font-medium text-primary"
+                        className={`${INLINE_LINK} mt-2 inline-flex text-[13px]`}
                         onClick={(e) => {
                           e.stopPropagation()
                           setFreeOpen(true)
@@ -133,7 +182,7 @@ export function TrialExpiredBilling(props: {
           <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
             2 Payment
           </p>
-          <div data-settings-card="" className="rounded-xl border border-border/50 bg-card p-5">
+          <div data-settings-card="" className="rounded-xl border bg-card p-5">
             <h3 className="text-sm font-semibold">Order summary</h3>
             {paidSelected ? (
               <OrderSummary plan={paidSelected} period={period} />
@@ -164,8 +213,9 @@ export function TrialExpiredBilling(props: {
           onOpenChange={setSubscribeOpen}
         />
       ) : null}
-      {freeOpen ? <FreeDowngradeDialog open onOpenChange={setFreeOpen} /> : null}
-      <p className="sr-only">Your {trialName} trial has ended.</p>
+      {freeOpen ? (
+        <FreeDowngradeDialog open onOpenChange={setFreeOpen} cancelLabel="Back to plans" />
+      ) : null}
     </div>
   )
 }

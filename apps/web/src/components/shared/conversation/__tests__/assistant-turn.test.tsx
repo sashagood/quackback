@@ -1,15 +1,29 @@
 // @vitest-environment happy-dom
 /**
- * AssistantAnswer / CitationDot: pins the existing (non-internal) citation
- * rendering byte-for-byte, then covers the additive internal-source styling
- * the Copilot leak gate relies on (COPILOT-SIDEBAR-UX.md B.4) — an amber tint
- * + lock badge on the pill, and an "Internal" hovercard tag in place of a URL
- * host when the citation carries no public url.
+ * Citation dots retain public/internal styling and show source details and
+ * freshness in a viewport-aware tooltip on hover.
  */
-import { describe, expect, it } from 'vitest'
-import { render, screen } from '@testing-library/react'
-import { AssistantAnswer, type RenderableCitation } from '../assistant-turn'
+import { afterEach, describe, expect, it } from 'vitest'
+import { cleanup, render as renderRTL, screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { IntlProvider } from 'react-intl'
+import { AssistantAnswer, AssistantSourcesTrace, type RenderableCitation } from '../assistant-turn'
 import type { ConversationMessageCitation } from '@/lib/shared/conversation/types'
+import en from '@/locales/en.json'
+import de from '@/locales/de.json'
+import { formatViewerDate } from '@/components/ui/local-date'
+
+afterEach(cleanup)
+
+function render(ui: React.ReactNode) {
+  return renderRTL(ui, {
+    wrapper: ({ children }) => (
+      <IntlProvider locale="en" messages={en}>
+        {children}
+      </IntlProvider>
+    ),
+  })
+}
 
 const publicCitation: ConversationMessageCitation = {
   type: 'article',
@@ -49,70 +63,129 @@ describe('<AssistantAnswer> citations', () => {
     )
 
     const dot = container.querySelector(
-      'a[aria-label="Internal source 1: Refund policy (internal)"]'
+      'span[aria-label="Internal source 1: Refund policy (internal)"]'
     )
     expect(dot).not.toBeNull()
     expect(dot?.className).toMatch(/amber/)
     expect(container.querySelector('.bg-amber-500')).toBeInTheDocument()
   })
 
-  it("shows an 'Internal' hovercard tag instead of a URL host when an internal citation has no url", () => {
+  it("shows an 'Internal' hovercard tag instead of a URL host when an internal citation has no url", async () => {
     render(<AssistantAnswer text="Refunds go here [1]." citations={[internalCitation]} />)
 
-    expect(screen.getByText('Internal')).toBeInTheDocument()
+    await userEvent.hover(screen.getByLabelText('Internal source 1: Refund policy (internal)'))
+    expect(await screen.findByText('Internal')).toBeInTheDocument()
   })
 
-  it('keeps showing the URL host in the hovercard for a public (non-internal) citation', () => {
+  it('keeps showing the URL host in the hovercard for a public (non-internal) citation', async () => {
     render(<AssistantAnswer text="Reset it here [1]." citations={[publicCitation]} />)
 
-    expect(screen.getByText('help.example.com')).toBeInTheDocument()
+    await userEvent.hover(screen.getByLabelText('Source 1: Resetting your password'))
+    expect(await screen.findByText('help.example.com')).toBeInTheDocument()
     expect(screen.queryByText('Internal')).not.toBeInTheDocument()
   })
 
-  it('an internal citation that DOES carry a url still shows the host, not the Internal tag', () => {
+  it('an internal citation that DOES carry a url still shows the host, not the Internal tag', async () => {
     const internalWithUrl: RenderableCitation = {
       ...internalCitation,
       url: 'https://internal.example.com/doc',
     }
     render(<AssistantAnswer text="See here [1]." citations={[internalWithUrl]} />)
 
-    expect(screen.getByText('internal.example.com')).toBeInTheDocument()
+    await userEvent.hover(screen.getByLabelText('Internal source 1: Refund policy (internal)'))
+    expect(await screen.findByText('internal.example.com')).toBeInTheDocument()
     expect(screen.queryByText('Internal')).not.toBeInTheDocument()
   })
 })
 
 describe('<AssistantAnswer> hovercard freshness line', () => {
-  const THREE_DAYS_AGO = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString()
+  const UPDATED_AT = '2026-10-20T12:00:00.000Z'
+  const UPDATED_LABEL = formatViewerDate(UPDATED_AT)
 
-  it('renders "Updated … ago" when the citation carries updatedAt', () => {
-    const cited: RenderableCitation = { ...publicCitation, updatedAt: THREE_DAYS_AGO }
-    const { container } = render(<AssistantAnswer text="Reset it here [1]." citations={[cited]} />)
+  it('renders "Updated <date>" when the citation carries updatedAt', async () => {
+    const cited: RenderableCitation = { ...publicCitation, updatedAt: UPDATED_AT }
+    render(<AssistantAnswer text="Reset it here [1]." citations={[cited]} />)
 
-    expect(container.textContent).toMatch(/Updated 3 days ago/)
+    await userEvent.hover(screen.getByLabelText(/source 1:/i))
+    expect(await screen.findByText(`Updated ${UPDATED_LABEL}`)).toBeInTheDocument()
   })
 
-  it('renders no freshness line when updatedAt is absent (exactly as before)', () => {
-    const { container } = render(
-      <AssistantAnswer text="Reset it here [1]." citations={[publicCitation]} />
-    )
+  it('renders no freshness line when updatedAt is absent', async () => {
+    render(<AssistantAnswer text="Reset it here [1]." citations={[publicCitation]} />)
 
-    expect(container.textContent).not.toMatch(/Updated/)
+    await userEvent.hover(screen.getByLabelText(/source 1:/i))
+    expect(await screen.findByText('help.example.com')).toBeInTheDocument()
+    expect(screen.queryByText(/Updated/)).not.toBeInTheDocument()
   })
 
-  it('renders no freshness line for an unparseable updatedAt', () => {
+  it('renders no freshness line for an unparseable updatedAt', async () => {
     const cited: RenderableCitation = { ...publicCitation, updatedAt: 'not-a-date' }
-    const { container } = render(<AssistantAnswer text="Reset it here [1]." citations={[cited]} />)
+    render(<AssistantAnswer text="Reset it here [1]." citations={[cited]} />)
 
-    expect(container.textContent).not.toMatch(/Updated/)
+    await userEvent.hover(screen.getByLabelText(/source 1:/i))
+    expect(await screen.findByText('help.example.com')).toBeInTheDocument()
+    expect(screen.queryByText(/Updated/)).not.toBeInTheDocument()
   })
 
-  it('still shows the freshness line alongside the Internal tag on an internal citation', () => {
-    const cited: RenderableCitation = { ...internalCitation, updatedAt: THREE_DAYS_AGO }
-    const { container } = render(
-      <AssistantAnswer text="Refunds go here [1]." citations={[cited]} />
-    )
+  it('still shows the freshness line alongside the Internal tag on an internal citation', async () => {
+    const cited: RenderableCitation = { ...internalCitation, updatedAt: UPDATED_AT }
+    render(<AssistantAnswer text="Refunds go here [1]." citations={[cited]} />)
 
-    expect(screen.getByText('Internal')).toBeInTheDocument()
-    expect(container.textContent).toMatch(/Updated 3 days ago/)
+    await userEvent.hover(screen.getByLabelText('Internal source 1: Refund policy (internal)'))
+    expect(await screen.findByText('Internal')).toBeInTheDocument()
+    expect(await screen.findByText(`Updated ${UPDATED_LABEL}`)).toBeInTheDocument()
+  })
+})
+
+describe('citation localization', () => {
+  it('localizes accessible public and internal source labels', () => {
+    renderRTL(
+      <IntlProvider locale="de" messages={de}>
+        <AssistantAnswer text="Read [1] and [2]." citations={[publicCitation, internalCitation]} />
+      </IntlProvider>
+    )
+    expect(
+      screen.getByRole('link', { name: 'Quelle 1: Resetting your password' })
+    ).toBeInTheDocument()
+    expect(screen.getByLabelText('Interne Quelle 2: Refund policy (internal)')).toBeInTheDocument()
+    expect(screen.queryByLabelText('Source 1: Resetting your password')).not.toBeInTheDocument()
+  })
+
+  it('uses the same locale for source freshness and the internal tag', async () => {
+    const cited = {
+      ...internalCitation,
+      updatedAt: '2026-10-20T12:00:00.000Z',
+    }
+    renderRTL(
+      <IntlProvider locale="de" messages={de}>
+        <AssistantAnswer text="Read [1]." citations={[cited]} />
+      </IntlProvider>
+    )
+    await userEvent.hover(screen.getByLabelText('Interne Quelle 1: Refund policy (internal)'))
+    expect(await screen.findByText('Intern')).toBeInTheDocument()
+    expect(
+      await screen.findByText(
+        `Aktualisiert ${formatViewerDate('2026-10-20T12:00:00.000Z', {}, 'de')}`
+      )
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/Updated|days ago/)).not.toBeInTheDocument()
+  })
+
+  it('localizes the knowledge trace and exposes its expanded state', async () => {
+    renderRTL(
+      <IntlProvider locale="de" messages={de}>
+        <AssistantSourcesTrace citations={[publicCitation]} />
+      </IntlProvider>
+    )
+    const trigger = screen.getByRole('button', {
+      name: 'Wissensdatenbank durchsucht · 1 Quelle',
+    })
+    expect(trigger).toHaveAttribute('aria-expanded', 'false')
+    await userEvent.click(trigger)
+    expect(trigger).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByRole('link', { name: /Resetting your password/ })).toHaveAttribute(
+      'href',
+      publicCitation.url
+    )
   })
 })

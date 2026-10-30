@@ -266,7 +266,7 @@ describe('RuleGroupBuilder — OR of groups', () => {
 
     expect(screen.getByText('OR')).toBeInTheDocument()
     expect(
-      screen.getByText("No rules in this group — it's ignored until you add one.")
+      screen.getByText("No rules in this group. It's ignored until you add one.")
     ).toBeInTheDocument()
     expect(screen.queryByText('No rules yet, so everything matches.')).not.toBeInTheDocument()
 
@@ -326,7 +326,7 @@ describe('RuleGroupBuilder — AI-classified attributes', () => {
     })
     expect(await screen.findByLabelText('AI')).toBeInTheDocument()
     expect(
-      screen.getByText('Classified by Quinn when conversations settle. Requires Inbox AI.')
+      screen.getByText('Classified by Quackback AI when conversations settle. Requires Inbox AI.')
     ).toBeInTheDocument()
     expect(screen.queryByText(/· AI/)).not.toBeInTheDocument()
   })

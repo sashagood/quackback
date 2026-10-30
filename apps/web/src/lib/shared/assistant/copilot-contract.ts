@@ -172,9 +172,12 @@ export const TRANSLATE_LANGUAGES = [
   { value: 'Dutch', label: 'Nederlands' },
   { value: 'French', label: 'Français' },
   { value: 'German', label: 'Deutsch' },
+  { value: 'Polish', label: 'Polski' },
   { value: 'Portuguese (Brazilian)', label: 'Português (Brasil)' },
   { value: 'Russian', label: 'Русский' },
   { value: 'Spanish', label: 'Español' },
+  { value: 'Thai', label: 'ภาษาไทย' },
+  { value: 'Ukrainian', label: 'Українська' },
 ] as const
 
 /** The completed rewrite (RUN_FINISHED.result). */

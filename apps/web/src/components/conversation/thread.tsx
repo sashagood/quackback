@@ -13,6 +13,7 @@ import type { JSONContent } from '@tiptap/core'
 import type { ConversationId } from '@quackback/ids'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { useVisitorSurfaceRpc, type VisitorSurfaceRpc } from '@/lib/client/visitor-surface-rpc'
+import { useHostShown } from '@/lib/client/hooks/use-host-shown'
 import {
   createValueStore,
   useDebouncedStoreValue,
@@ -27,7 +28,13 @@ import type { ConversationMessageDTO } from '@/lib/shared/conversation/types'
 export function docHasContentNode(doc: JSONContent | null): boolean {
   if (!doc) return false
   const walk = (nodes: JSONContent[] | undefined): boolean =>
-    !!nodes?.some((n) => n.type === 'chatImage' || n.type === 'quackbackEmbed' || walk(n.content))
+    !!nodes?.some(
+      (n) =>
+        n.type === 'resizableImage' ||
+        n.type === 'image' ||
+        n.type === 'quackbackEmbed' ||
+        walk(n.content)
+    )
   return walk(doc.content)
 }
 
@@ -270,6 +277,7 @@ export function useMarkReadOnIncoming({
   readThrough,
   getHeaders,
   onMarked,
+  recheck = 0,
 }: {
   conversationId: ConversationId | null
   messages: ConversationMessageDTO[]
@@ -278,6 +286,8 @@ export function useMarkReadOnIncoming({
   readThrough?: string | null
   getHeaders?: () => Record<string, string>
   onMarked?: () => void
+  /** Bump to check again with no new message, e.g. when a hidden thread is shown. */
+  recheck?: number
 }) {
   const lastMessage = messages.at(-1)
   const lastMessageId = lastMessage?.id
@@ -291,6 +301,10 @@ export function useMarkReadOnIncoming({
   onMarkedRef.current = onMarked
   const readThroughRef = useRef(readThrough)
   readThroughRef.current = readThrough
+  // A frame its host is hiding is not being read: what arrives meanwhile stays
+  // unread until the frame is shown again, and is read then.
+  const hostShown = useHostShown()
+  if (!hostShown) enabled = false
 
   useEffect(() => {
     if (!conversationId || !enabled) return
@@ -306,7 +320,7 @@ export function useMarkReadOnIncoming({
       .then(() => onMarkedRef.current?.())
       .catch(() => {})
     // lastSenderType is derived from lastMessageId (same message, same sender).
-  }, [conversationId, lastMessageId, enabled, whenLastFrom, lastSenderType])
+  }, [conversationId, lastMessageId, enabled, whenLastFrom, lastSenderType, recheck])
 }
 
 /** Throttled-typing sender for the composer (wired into useConversationTyping). */

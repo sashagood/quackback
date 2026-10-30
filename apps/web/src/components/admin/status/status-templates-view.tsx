@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { PencilSquareIcon, PlusIcon, TrashIcon } from '@heroicons/react/24/solid'
+import { PencilSquareIcon, TrashIcon } from '@heroicons/react/24/solid'
 import { DocumentDuplicateIcon } from '@heroicons/react/24/outline'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -26,6 +26,8 @@ import {
 } from '@/components/ui/dialog'
 import { ConfirmDialog } from '@/components/shared/confirm-dialog'
 import { EmptyState } from '@/components/shared/empty-state'
+import { NewButton } from '@/components/shared/new-button'
+import { AdminListHeader } from '@/components/admin/admin-list-header'
 import {
   statusComponentQueries,
   statusTemplateQueries,
@@ -38,6 +40,7 @@ import {
   useUpdateStatusIncidentTemplate,
 } from '@/lib/client/mutations/status'
 import { IMPACT_LABELS, type StatusIncidentImpact } from './status-admin-colors'
+import { useStatusAccess } from './status-access'
 
 function flattenComponents(data: StatusComponentsAdmin | undefined) {
   if (!data) return []
@@ -50,10 +53,18 @@ function flattenComponents(data: StatusComponentsAdmin | undefined) {
 
 export function StatusTemplatesView() {
   const { data: templates, isLoading } = useQuery(statusTemplateQueries.list())
+  // Publishers read templates (the composers insert them); only
+  // status_page.manage adds, edits or deletes them.
+  const { canManage } = useStatusAccess()
   const [editing, setEditing] = useState<StatusIncidentTemplate | null>(null)
   const [creating, setCreating] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<StatusIncidentTemplate | null>(null)
   const deleteMutation = useDeleteStatusIncidentTemplate()
+  const [search, setSearch] = useState('')
+  const term = search.trim().toLowerCase()
+  const visibleTemplates = (templates ?? []).filter(
+    (t) => !term || t.name.toLowerCase().includes(term) || t.title.toLowerCase().includes(term)
+  )
 
   async function confirmDelete() {
     if (!deleteTarget) return
@@ -68,13 +79,14 @@ export function StatusTemplatesView() {
 
   return (
     <div className="max-w-3xl w-full flex flex-col flex-1 min-h-0">
-      <div className="sticky top-0 z-10 bg-background/95 backdrop-blur-sm px-3 py-2.5 flex items-center gap-2 border-b border-border/40">
-        <h2 className="text-sm font-semibold px-1">Templates</h2>
-        <Button size="sm" className="ml-auto" onClick={() => setCreating(true)}>
-          <PlusIcon className="h-4 w-4 mr-1.5" />
-          New template
-        </Button>
-      </div>
+      <AdminListHeader
+        searchValue={search}
+        onSearchChange={setSearch}
+        searchPlaceholder="Search templates..."
+        action={
+          canManage ? <NewButton noun="template" onClick={() => setCreating(true)} /> : undefined
+        }
+      />
 
       {isLoading ? (
         <div className="p-3 space-y-2">
@@ -99,18 +111,17 @@ export function StatusTemplatesView() {
             title="No templates yet"
             description="Templates prefill an incident's title, body, impact, and affected components."
             action={
-              <Button size="sm" onClick={() => setCreating(true)}>
-                <PlusIcon className="h-4 w-4 mr-1.5" />
-                New template
-              </Button>
+              canManage ? (
+                <NewButton noun="template" onClick={() => setCreating(true)} />
+              ) : undefined
             }
             className="h-48"
           />
         </div>
       ) : (
         <div className="p-3 space-y-3">
-          <div className="rounded-xl overflow-hidden border border-border/50 bg-card shadow-sm divide-y divide-border/50">
-            {templates.map((t) => (
+          <div className="overflow-hidden border-y border-t-transparent border-border/50 divide-y divide-border/50">
+            {visibleTemplates.map((t) => (
               <div key={t.id} className="group flex items-center gap-3 px-4 py-3">
                 <div className="min-w-0 flex-1">
                   <div className="text-sm font-medium">{t.name}</div>
@@ -124,24 +135,26 @@ export function StatusTemplatesView() {
                 ) : (
                   <span className="text-xs text-muted-foreground">Unused</span>
                 )}
-                <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7"
-                    onClick={() => setEditing(t)}
-                  >
-                    <PencilSquareIcon className="h-3.5 w-3.5" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7 text-muted-foreground hover:text-destructive"
-                    onClick={() => setDeleteTarget(t)}
-                  >
-                    <TrashIcon className="h-3.5 w-3.5" />
-                  </Button>
-                </div>
+                {canManage && (
+                  <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7"
+                      onClick={() => setEditing(t)}
+                    >
+                      <PencilSquareIcon className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                      onClick={() => setDeleteTarget(t)}
+                    >
+                      <TrashIcon className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -152,24 +165,29 @@ export function StatusTemplatesView() {
         </div>
       )}
 
-      <TemplateFormDialog open={creating} onOpenChange={setCreating} mode="create" />
-      <TemplateFormDialog
-        open={!!editing}
-        onOpenChange={(o) => !o && setEditing(null)}
-        mode="edit"
-        template={editing}
-      />
+      {/* The form reads the full service list, which is manage-only too. */}
+      {canManage && (
+        <>
+          <TemplateFormDialog open={creating} onOpenChange={setCreating} mode="create" />
+          <TemplateFormDialog
+            open={!!editing}
+            onOpenChange={(o) => !o && setEditing(null)}
+            mode="edit"
+            template={editing}
+          />
 
-      <ConfirmDialog
-        open={!!deleteTarget}
-        onOpenChange={(o) => !o && setDeleteTarget(null)}
-        title="Delete template?"
-        description={`Are you sure you want to delete "${deleteTarget?.name}"? This cannot be undone.`}
-        confirmLabel="Delete"
-        variant="destructive"
-        isPending={deleteMutation.isPending}
-        onConfirm={confirmDelete}
-      />
+          <ConfirmDialog
+            open={!!deleteTarget}
+            onOpenChange={(o) => !o && setDeleteTarget(null)}
+            title="Delete template?"
+            description={`Are you sure you want to delete "${deleteTarget?.name}"? This cannot be undone.`}
+            confirmLabel="Delete"
+            variant="destructive"
+            isPending={deleteMutation.isPending}
+            onConfirm={confirmDelete}
+          />
+        </>
+      )}
     </div>
   )
 }

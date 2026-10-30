@@ -60,8 +60,44 @@ vi.mock('@/lib/server/db', async (importOriginal) => ({
   sql: vi.fn(),
 }))
 
+/**
+ * The `event-hook-job` child logger, observed. The real logger is kept; only
+ * the child this handler logs through has its warn and error spied, so the
+ * level a failure is reported at is what the assertions read.
+ */
+const hookLog = vi.hoisted(() => ({ warn: vi.fn(), error: vi.fn() }))
+vi.mock('@/lib/server/logger', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/server/logger')>()
+  const realChild = actual.logger.child.bind(actual.logger)
+  const logger = Object.create(actual.logger)
+  logger.child = (bindings: Record<string, unknown>) => {
+    const child = realChild(bindings)
+    if (bindings.component !== 'event-hook-job') return child
+    return Object.assign(Object.create(child), { warn: hookLog.warn, error: hookLog.error })
+  }
+  return { ...actual, logger }
+})
+
 const syncProducer = vi.hoisted(() => vi.fn().mockResolvedValue({ id: 'op-1', state: 'uncertain' }))
 vi.mock('@/lib/server/integrations/sync/hooks', () => ({ queueHookSync: syncProducer }))
+
+// The scheduler's sentinel handlers, observed.
+const sentinels = vi.hoisted(() => ({
+  notifyChangelogPublished: vi.fn().mockResolvedValue(undefined),
+  handleMaintenanceStart: vi.fn().mockResolvedValue(undefined),
+  handleMaintenanceComplete: vi.fn().mockResolvedValue(undefined),
+  checkPostForMergeCandidates: vi.fn().mockResolvedValue(undefined),
+}))
+vi.mock('@/lib/server/domains/changelog/changelog.service', () => ({
+  notifyChangelogPublished: sentinels.notifyChangelogPublished,
+}))
+vi.mock('@/lib/server/domains/status/status.maintenance', () => ({
+  handleMaintenanceStart: sentinels.handleMaintenanceStart,
+  handleMaintenanceComplete: sentinels.handleMaintenanceComplete,
+}))
+vi.mock('@/lib/server/domains/merge-suggestions/merge-check.service', () => ({
+  checkPostForMergeCandidates: sentinels.checkPostForMergeCandidates,
+}))
 
 // --- Helpers ---
 
@@ -231,6 +267,33 @@ describe('Event processing', () => {
       }
     )
 
+    // `scheduleDispatch` queues these with `event: null`: each reads its
+    // payload from config, so none may touch the event.
+    it.each([
+      ['__changelog_publish__', { changelogId: 'changelog_1' }, 'notifyChangelogPublished'],
+      ['__post_merge_recheck__', { postId: 'post_1' }, 'checkPostForMergeCandidates'],
+      [
+        '__status_maintenance_start__',
+        { incidentId: 'status_incident_1' },
+        'handleMaintenanceStart',
+      ],
+      [
+        '__status_maintenance_complete__',
+        { incidentId: 'status_incident_1' },
+        'handleMaintenanceComplete',
+      ],
+    ] as const)(
+      'runs the scheduled %s job, which carries no event',
+      async (hookType, config, handler) => {
+        const job = makeJob({
+          payload: { hookType, event: null, target: null, config: { ...config, actor: undefined } },
+        })
+        await expect(runHookJob(job)).resolves.toBeUndefined()
+        expect(sentinels[handler]).toHaveBeenCalledTimes(1)
+        expect(mockGetHook).not.toHaveBeenCalled()
+      }
+    )
+
     it('succeeds silently when hook returns success', async () => {
       const mockHook = { run: vi.fn().mockResolvedValue({ success: true }) }
       mockGetHook.mockReturnValue(mockHook)
@@ -244,7 +307,19 @@ describe('Event processing', () => {
       mockGetHook.mockReturnValue(mockHook)
 
       await runHookJob(makeJob())
-      expect(mockHook.run.mock.calls[0][3]).toEqual({ jobId: 'evt-123:webhook:abc' })
+      expect(mockHook.run.mock.calls[0][3]).toEqual({
+        jobId: 'evt-123:webhook:abc',
+        finalAttempt: false,
+      })
+    })
+
+    it('tells the hook when this attempt is the last one the queue will make', async () => {
+      const mockHook = { run: vi.fn().mockResolvedValue({ success: true }) }
+      mockGetHook.mockReturnValue(mockHook)
+
+      await runHookJob(makeJob({ attempts: 5, maxAttempts: 6 }))
+      await runHookJob(makeJob({ attempts: 6, maxAttempts: 6 }))
+      expect(mockHook.run.mock.calls.map((call) => call[3].finalAttempt)).toEqual([false, true])
     })
 
     it('falls back to the branded job id when a row carries no dedupe key', async () => {
@@ -252,7 +327,7 @@ describe('Event processing', () => {
       mockGetHook.mockReturnValue(mockHook)
 
       await runHookJob(makeJob({ dedupeKey: null, jobId: 'job_fallback' }))
-      expect(mockHook.run.mock.calls[0][3]).toEqual({ jobId: 'job_fallback' })
+      expect(mockHook.run.mock.calls[0][3]).toMatchObject({ jobId: 'job_fallback' })
     })
 
     it('throws a terminal error for an unknown hook type', async () => {
@@ -305,6 +380,38 @@ describe('Event processing', () => {
       const err = (await runHookJob(makeJob()).catch((e: unknown) => e)) as Error
       expect(isTerminalJobError(err)).toBe(true)
       expect(err.message).toBe('Cannot read property')
+    })
+  })
+
+  /**
+   * A failure with attempts left is expected (a throttled send, a blip) and the
+   * queue will try again; only the one that ends the job is worth an error.
+   */
+  describe('onHookJobFailure — log level', () => {
+    const throttled = Object.assign(
+      new Error('SES email send failed: Maximum sending rate exceeded.'),
+      {
+        status: 429,
+        code: 'TooManyRequestsException',
+      }
+    )
+
+    it('warns about a failure another attempt will follow', async () => {
+      await onHookJobFailure(makeJob({ attempts: 1 }), throttled, false)
+      expect(hookLog.warn).toHaveBeenCalledWith(
+        expect.objectContaining({ permanent: false, attempt: 1 }),
+        'hook failed'
+      )
+      expect(hookLog.error).not.toHaveBeenCalled()
+    })
+
+    it('reports the failure that ends the job at error', async () => {
+      await onHookJobFailure(makeJob({ attempts: 6 }), throttled, true)
+      expect(hookLog.error).toHaveBeenCalledWith(
+        expect.objectContaining({ permanent: true, attempt: 6 }),
+        'hook failed'
+      )
+      expect(hookLog.warn).not.toHaveBeenCalled()
     })
   })
 

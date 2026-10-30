@@ -22,6 +22,9 @@ import {
 import { PERMISSIONS, type PermissionKey } from '@/lib/shared/permissions'
 import { DEFAULT_FEATURE_FLAGS, getProductFlagUpdate } from '@/lib/shared/types/settings'
 import { TooltipProvider } from '@/components/ui/tooltip'
+import { SearchPaletteContext } from '../ask/search-palette'
+
+const searchContext = { open: vi.fn() }
 
 vi.stubGlobal('__APP_VERSION__', '0.0.0-test')
 
@@ -106,13 +109,18 @@ function buildRouter() {
     validateSearch: (search: Record<string, unknown>) => search as { post?: string },
     component: () => <p>feedback page</p>,
   })
+  const home = createRoute({
+    getParentRoute: () => adminRoute,
+    path: '/',
+    component: () => <p>home page</p>,
+  })
   const roadmap = createRoute({
     getParentRoute: () => adminRoute,
     path: '/roadmap',
     component: () => <p>roadmap page</p>,
   })
   return createRouter({
-    routeTree: rootRoute.addChildren([adminRoute.addChildren([feedback, roadmap])]),
+    routeTree: rootRoute.addChildren([adminRoute.addChildren([home, feedback, roadmap])]),
     history: createMemoryHistory({ initialEntries: ['/admin/feedback'] }),
     context: {},
   })
@@ -124,7 +132,9 @@ async function mount() {
     <QueryClientProvider client={new QueryClient()}>
       <IntlProvider locale="en" messages={{}}>
         <TooltipProvider>
-          <RouterProvider router={router} />
+          <SearchPaletteContext.Provider value={searchContext}>
+            <RouterProvider router={router} />
+          </SearchPaletteContext.Provider>
         </TooltipProvider>
       </IntlProvider>
     </QueryClientProvider>
@@ -140,7 +150,7 @@ describe('AdminSidebar renders', () => {
   it('renders nothing for a search-only navigation', async () => {
     adminAnswer = {
       principal: { role: 'admin' },
-      permissions: [PERMISSIONS.ASSISTANT_MANAGE, PERMISSIONS.WORKFLOW_MANAGE],
+      permissions: [PERMISSIONS.AI_CUSTOMER_MANAGE, PERMISSIONS.WORKFLOW_MANAGE],
     }
     const { router, container } = await mount()
     expect(activeHrefs(container)).toEqual(['/admin/feedback'])
@@ -159,7 +169,7 @@ describe('AdminSidebar renders', () => {
   it('moves the highlight between pages without rendering the items again', async () => {
     adminAnswer = {
       principal: { role: 'admin' },
-      permissions: [PERMISSIONS.ASSISTANT_MANAGE, PERMISSIONS.WORKFLOW_MANAGE],
+      permissions: [PERMISSIONS.AI_CUSTOMER_MANAGE, PERMISSIONS.WORKFLOW_MANAGE],
     }
     const { router, container } = await mount()
     const before = { ...iconRenders }
@@ -175,17 +185,27 @@ describe('AdminSidebar renders', () => {
     expect(bellRenders).toBe(bell)
   })
 
+  it('highlights Home only on the admin index, not on every admin page', async () => {
+    adminAnswer = { principal: { role: 'admin' }, permissions: [] }
+    const { router, container } = await mount()
+    expect(activeHrefs(container)).not.toContain('/admin')
+
+    await act(() => router.navigate({ to: '/admin' }))
+    await screen.findByText('home page')
+    expect(activeHrefs(container)).toEqual(['/admin'])
+  })
+
   it('shows and hides permission-gated items when the permissions change', async () => {
     adminAnswer = {
       principal: { role: 'member' },
-      permissions: [PERMISSIONS.ASSISTANT_MANAGE],
+      permissions: [PERMISSIONS.AI_CUSTOMER_MANAGE],
     }
     const { router, container } = await mount()
-    expect(container.querySelector('aside a[href="/admin/automation/agent"]')).toBeTruthy()
+    expect(container.querySelector('aside a[href="/admin/settings"]')).toBeTruthy()
 
     adminAnswer = { principal: { role: 'member' }, permissions: [] }
     await act(() => router.invalidate())
 
-    expect(container.querySelector('aside a[href="/admin/automation/agent"]')).toBeNull()
+    expect(container.querySelector('aside a[href="/admin/settings"]')).toBeNull()
   })
 })

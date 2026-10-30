@@ -159,7 +159,7 @@ describe('buildFlowNodes / buildFlowEdges — no branch', () => {
     )
     expect(capped.find((n) => n.id === tree.triggerId)?.data.sections).toEqual([
       { label: 'Channels', chips: [{ label: 'All channels' }] },
-      { label: 'Frequency cap', chips: [{ label: 'At most 3 times per person' }] },
+      { label: 'Frequency cap', chips: [{ label: 'At most 3 times per user' }] },
     ])
 
     const unlimited = buildFlowNodes(
@@ -254,7 +254,7 @@ describe('buildFlowNodes / buildFlowEdges — no branch', () => {
     })
   })
 
-  it('renders Let Quinn answer as a Step with the engine-default 10-min escalate chip', () => {
+  it('renders Let the AI agent answer as a Step with the engine-default 10-min escalate chip', () => {
     let tree = newTree()
     const step = createStep(tree, 'let_assistant_answer')
     tree = insertStepAt(tree, ROOT_LOCATION, 0, step)
@@ -262,9 +262,13 @@ describe('buildFlowNodes / buildFlowEdges — no branch', () => {
     expect(node).toMatchObject({
       data: {
         eyebrow: 'Step',
-        title: 'Let Quinn answer',
+        title: 'Let the AI agent answer',
         chips: [
-          { label: "Escalates after 10 min if Quinn can't reply", tone: 'amber', wrap: true },
+          {
+            label: "Escalates after 10 min if the AI agent can't reply",
+            tone: 'amber',
+            wrap: true,
+          },
         ],
       },
     })
@@ -278,7 +282,7 @@ describe('buildFlowNodes / buildFlowEdges — no branch', () => {
       (n) => n.id === step.id
     )
     expect(node?.data).toMatchObject({
-      chips: [{ label: "Escalates after 5 min if Quinn can't reply" }],
+      chips: [{ label: "Escalates after 5 min if the AI agent can't reply" }],
     })
   })
 })

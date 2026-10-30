@@ -17,8 +17,25 @@
  */
 import { createRef } from 'react'
 import { describe, expect, it, vi, afterEach } from 'vitest'
-import { act, render, screen, cleanup, fireEvent, waitFor } from '@testing-library/react'
+import {
+  act,
+  render as rtlRender,
+  screen,
+  cleanup,
+  fireEvent,
+  waitFor,
+  within,
+} from '@testing-library/react'
+import { IntlProvider } from 'react-intl'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+
+function render(node: React.ReactNode) {
+  return rtlRender(
+    <IntlProvider locale="en-US" messages={{}}>
+      {node}
+    </IntlProvider>
+  )
+}
 import type { TicketDTO } from '@/lib/server/domains/tickets'
 import type { ConversationDTO, AgentConversationMessageDTO } from '@/lib/shared/conversation/types'
 import type { LinkedTicketSummary } from '@/lib/shared/inbox/items'
@@ -41,6 +58,7 @@ const threadProbe = vi.hoisted(() => ({
   gate: null as null | Promise<void>,
   linkFetches: 0,
   translationEnabled: [] as boolean[],
+  overAllowanceNotice: null as string | null,
   panelOnChanged: [] as unknown[],
   remeasure: () => {},
 }))
@@ -116,18 +134,37 @@ vi.mock('../composer-ai-actions', () => ({
     return <div data-testid="composer-ai-actions" data-active-mode={activeMode} />
   },
 }))
+// Renders of the header's triage controls and tags row, by name.
+const headerRenders = vi.hoisted(() => ({ counts: {} as Record<string, number> }))
+const countRender = (name: string) => {
+  headerRenders.counts[name] = (headerRenders.counts[name] ?? 0) + 1
+}
 vi.mock('@/components/admin/conversation/priority-control', () => ({
-  PriorityControl: () => <span data-testid="priority-control" />,
+  PriorityControl: () => {
+    countRender('priority')
+    return <span data-testid="priority-control" />
+  },
 }))
 vi.mock('@/components/admin/conversation/assignee-control', () => ({
-  AssigneeControl: () => null,
+  AssigneeControl: () => {
+    countRender('assignee')
+    return null
+  },
 }))
 vi.mock('@/components/admin/conversation/channel-badge', () => ({ ChannelBadge: () => null }))
 vi.mock('@/components/admin/conversation/sla-chip', () => ({ SlaChip: () => null }))
 vi.mock('@/components/admin/conversation/conversation-tags-editor', () => ({
-  ConversationTagsEditor: () => null,
+  ConversationTagsEditor: () => {
+    countRender('tags')
+    return null
+  },
 }))
-vi.mock('@/components/admin/conversation/status-control', () => ({ StatusControl: () => null }))
+vi.mock('@/components/admin/conversation/status-control', () => ({
+  StatusControl: () => {
+    countRender('status')
+    return null
+  },
+}))
 // The detail panel renders whenever the thread does, so it doubles as the
 // thread's render counter. The editor stub hands out its latest onChange.
 const composer = vi.hoisted(() => ({
@@ -221,7 +258,6 @@ vi.mock('@/components/ui/rich-text-editor', async () => {
       }))
       return <textarea ref={areaRef} data-testid="editor" placeholder={placeholder} readOnly />
     },
-    RichTextContent: () => null,
   }
 })
 vi.mock('@/components/shared/composer-attachment-tray', () => ({
@@ -250,21 +286,26 @@ vi.mock('@/lib/client/hooks/use-inbox-translation', () => ({
       dismissSuggestion: vi.fn(),
       activateFromSuggestion: vi.fn(),
       detectedLanguageLabel: '',
+      overAllowanceNotice: threadProbe.overAllowanceNotice,
     }
   },
 }))
 vi.mock('@/lib/client/hooks/use-copilot-insert', () => ({ useCopilotInsert: () => vi.fn() }))
-vi.mock('@/lib/client/hooks/use-image-upload', () => ({
-  useImageUpload: () => ({ upload: vi.fn() }),
+vi.mock('@/lib/client/hooks/use-file-upload', () => ({
+  useAgentFileUpload: () => ({ upload: vi.fn() }),
 }))
 const addFiles = vi.fn()
 vi.mock('@/lib/client/hooks/use-conversation-composer-attachments', () => ({
   useConversationComposerAttachments: () => ({
-    pending: [],
+    items: [],
+    attachments: [],
     addFiles,
     remove: vi.fn(),
+    retry: vi.fn(),
     clear: vi.fn(),
+    restore: vi.fn(),
     uploading: false,
+    hasErrors: false,
   }),
 }))
 
@@ -469,7 +510,7 @@ function makeConversation(overrides: Partial<ConversationDTO> = {}): Conversatio
 
 function renderThread(
   item: { kind: 'conversation' | 'ticket'; id: string },
-  extra: { detailPanelShown?: boolean } = {}
+  extra: { detailPanelShown?: boolean; replyFirst?: boolean } = {}
 ) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
@@ -590,6 +631,42 @@ describe('AgentConversationThread — conversation kind unaffected', () => {
     expect(await screen.findByRole('menuitemradio', { name: 'Note' })).toBeInTheDocument()
     expect(screen.getByTestId('inbox-detail-panel')).toBeInTheDocument()
     expect(screen.getByTestId('composer-ai-actions')).toHaveAttribute('data-active-mode', 'reply')
+  })
+})
+
+describe('AgentConversationThread: reply first (the Try Messenger sheet)', () => {
+  it('keeps Close filled and the send button an icon in the inbox', async () => {
+    renderThread({ kind: 'conversation', id: 'conversation_1' })
+    expect((await screen.findByRole('button', { name: 'Close' })).className).toContain('bg-primary')
+    expect(screen.getByRole('button', { name: 'Send reply' }).textContent).toBe('')
+  })
+
+  it('makes the reply the primary action and quiets Close', async () => {
+    renderThread({ kind: 'conversation', id: 'conversation_1' }, { replyFirst: true })
+    const close = await screen.findByRole('button', { name: 'Close' })
+    expect(close.className).not.toContain('bg-primary')
+    const send = screen.getByRole('button', { name: 'Send reply' })
+    expect(send.textContent).toBe('Send')
+    expect(send.className).toContain('bg-primary')
+  })
+})
+
+describe('AgentConversationThread: details toggle below the inline panel width', () => {
+  it('offers a Details button that opens the details content in a sheet', async () => {
+    renderThread({ kind: 'conversation', id: 'conversation_1' }, { detailPanelShown: false })
+    const toggle = await screen.findByRole('button', { name: 'Details' })
+    expect(screen.queryByRole('dialog')).toBeNull()
+    fireEvent.click(toggle)
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByTestId('inbox-detail-panel')).toHaveAttribute('data-visible', 'true')
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' })
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull())
+  })
+
+  it('has no Details button where the panel is inline', async () => {
+    renderThread({ kind: 'conversation', id: 'conversation_1' }, { detailPanelShown: true })
+    await screen.findByRole('button', { name: 'Snooze' })
+    expect(screen.queryByRole('button', { name: 'Details' })).toBeNull()
   })
 })
 
@@ -802,6 +879,23 @@ describe('AgentConversationThread — composer focus handle', () => {
     // The marker follows the note composer too — the modes share one box.
     act(() => composerRef.current?.focusComposer('note'))
     expect(screen.getByTestId('editor').closest('[data-inbox-composer]')).not.toBeNull()
+  })
+
+  // The editor inside is borderless, so the box is the only place focus shows.
+  // Both modes keep a cue, and it is neutral: never the brand or note amber.
+  it('shows a neutral focus cue on the composer box in reply and note mode', async () => {
+    const composerRef = renderWithHandle({ kind: 'conversation', id: 'conversation_1' })
+    const focusClasses = () =>
+      (screen.getByTestId('editor').closest('[data-inbox-composer]') as HTMLElement).className
+        .split(/\s+/)
+        .filter((c) => c.startsWith('focus-within:'))
+
+    await screen.findByTestId('editor')
+    expect(focusClasses().some((c) => c.includes('-ring'))).toBe(true)
+
+    act(() => composerRef.current?.focusComposer('note'))
+    expect(focusClasses().some((c) => c.includes('-ring'))).toBe(true)
+    expect(focusClasses().some((c) => /amber|primary/.test(c))).toBe(false)
   })
 
   it('pasting an image on the composer stages the attachment tray, not an inline node', async () => {
@@ -1047,6 +1141,25 @@ describe('AgentConversationThread: reads that ride with the thread', () => {
   })
 })
 
+describe('AgentConversationThread: inbox translation past the AI allowance', () => {
+  it('shows the notice above the composer, and nothing when there is none', async () => {
+    threadProbe.overAllowanceNotice =
+      'AI usage for this period is used up. Translation keeps working. Upgrade your plan for more.'
+    renderThread({ kind: 'conversation', id: 'conversation_over_allowance' })
+    expect(
+      await screen.findByText(
+        'AI usage for this period is used up. Translation keeps working. Upgrade your plan for more.'
+      )
+    ).toBeTruthy()
+    cleanup()
+
+    threadProbe.overAllowanceNotice = null
+    renderThread({ kind: 'conversation', id: 'conversation_within_allowance' })
+    await screen.findByTestId('editor')
+    expect(screen.queryByText(/AI usage/)).toBeNull()
+  })
+})
+
 describe('AgentConversationThread: stable props for memoized children', () => {
   it('hands the detail panel the same refresh handler across thread re-renders', async () => {
     threadProbe.panelOnChanged = []
@@ -1125,6 +1238,26 @@ describe('AgentConversationThread composer typing', () => {
     composer.threadRenders = 0
     type('H', 'Hello there')
     expect(composer.threadRenders).toBe(0)
+  })
+
+  it('keeps the header controls out of the render the first character causes', async () => {
+    renderThread({ kind: 'conversation', id: 'conversation_1' })
+    await screen.findByTestId('inbox-detail-panel')
+    expect(Object.keys(headerRenders.counts).sort()).toEqual([
+      'assignee',
+      'priority',
+      'status',
+      'tags',
+    ])
+    const before = { ...headerRenders.counts }
+    composer.threadRenders = 0
+
+    type('', 'H')
+
+    // The thread did re-render (the reply became sendable) ...
+    expect(composer.threadRenders).toBeGreaterThan(0)
+    // ... and the header controls did not.
+    expect(headerRenders.counts).toEqual(before)
   })
 
   it('sends the reply as typed and empties the composer', async () => {

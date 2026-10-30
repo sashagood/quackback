@@ -6,17 +6,17 @@
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { DocumentTextIcon } from '@heroicons/react/24/outline'
+import { Badge } from '@/components/ui/badge'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { StatusSelect } from '@/components/shared/sidebar-primitives'
 import {
   statusComponentQueries,
   statusTemplateQueries,
-  type StatusComponentsAdmin,
+  type StatusComponentChoices,
 } from '@/lib/client/queries/status'
 import {
   COMPONENT_STATUS_OPTIONS,
-  LIFECYCLE_COLORS,
   LIFECYCLE_LABELS,
   defaultAffectedStatus,
   type StatusComponentStatus,
@@ -36,7 +36,7 @@ interface FlatComponent {
   groupName: string | null
 }
 
-function flattenComponents(data: StatusComponentsAdmin | undefined): FlatComponent[] {
+function flattenComponents(data: StatusComponentChoices | undefined): FlatComponent[] {
   if (!data) return []
   const flat: FlatComponent[] = []
   for (const group of data.groups) {
@@ -57,7 +57,7 @@ export function AffectedComponentsField({
   value: AffectedRow[]
   onChange: (next: AffectedRow[]) => void
 }) {
-  const { data, isLoading } = useQuery(statusComponentQueries.list())
+  const { data, isLoading, isError, refetch } = useQuery(statusComponentQueries.choices())
   const components = useMemo(() => flattenComponents(data), [data])
   const byId = useMemo(() => new Map(value.map((v) => [v.componentId, v.componentStatus])), [value])
 
@@ -74,6 +74,18 @@ export function AffectedComponentsField({
   }
 
   if (isLoading) return <p className="text-xs text-muted-foreground">Loading services…</p>
+  // A failed load is not an empty list: saying "No services yet" would send
+  // the admin off to create services that already exist.
+  if (isError) {
+    return (
+      <p className="text-xs text-destructive">
+        Couldn't load services.{' '}
+        <button type="button" className="underline" onClick={() => void refetch()}>
+          Try again
+        </button>
+      </p>
+    )
+  }
   if (components.length === 0) {
     return <p className="text-xs text-muted-foreground">No services yet. Create one first.</p>
   }
@@ -162,16 +174,30 @@ export function TemplatePickerButton({
   )
 }
 
-/** The uppercase colored lifecycle label used by list rows, overview cards,
- *  and the editor timeline header. */
+const LIFECYCLE_VARIANT: Record<StatusIncidentLifecycle, 'success' | 'warning' | 'secondary'> = {
+  investigating: 'warning',
+  identified: 'warning',
+  monitoring: 'warning',
+  resolved: 'secondary',
+  scheduled: 'secondary',
+  in_progress: 'warning',
+  verifying: 'warning',
+  completed: 'secondary',
+}
+
+/**
+ * The sentence-case lifecycle badge used by list rows and overview cards. A
+ * finished incident or maintenance window is the normal end state, so it reads
+ * as muted text instead of a badge.
+ */
 export function LifecycleBadge({ status }: { status: StatusIncidentLifecycle }) {
+  if (status === 'resolved' || status === 'completed') {
+    return <span className="text-xs text-muted-foreground">{LIFECYCLE_LABELS[status]}</span>
+  }
   return (
-    <span
-      className="font-semibold uppercase tracking-wide text-[11px]"
-      style={{ color: LIFECYCLE_COLORS[status] }}
-    >
+    <Badge variant={LIFECYCLE_VARIANT[status]} size="sm">
       {LIFECYCLE_LABELS[status]}
-    </span>
+    </Badge>
   )
 }
 

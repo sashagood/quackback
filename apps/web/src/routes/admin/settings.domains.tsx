@@ -3,10 +3,8 @@ import { PERMISSIONS } from '@/lib/shared/permissions'
 import { assertRoutePermission } from '@/lib/shared/route-permission'
 import { useMutation } from '@tanstack/react-query'
 import { createFileRoute, useRouter } from '@tanstack/react-router'
-import { GlobeAltIcon } from '@heroicons/react/24/solid'
 import { toast } from 'sonner'
-import { BackLink } from '@/components/ui/back-link'
-import { PageHeader } from '@/components/shared/page-header'
+import { SettingsPage } from '@/components/admin/settings/settings-page'
 import {
   getCloudCustomDomainsFn,
   getCloudIdentityFn,
@@ -19,8 +17,10 @@ import type { CustomDomainInstruction } from '@/lib/server/control-plane/client'
 import { platformUrlSuffix } from '@/lib/shared/platform-label'
 import { DomainsCard, QuackbackUrlCard } from '@/components/admin/settings/domains-cards'
 import { useCloudEnabled } from '@/lib/client/hooks/use-root-context'
+import { adminPageHead } from '@/lib/client/admin-head'
 
 export const Route = createFileRoute('/admin/settings/domains')({
+  head: adminPageHead('Domains settings'),
   loader: async ({ context }) => {
     assertRoutePermission(context.permissions, PERMISSIONS.SETTINGS_CUSTOM_DOMAIN)
     const { cloudEnabled } = context
@@ -112,18 +112,13 @@ function DomainsSettingsPage() {
   })
 
   return (
-    <div className="space-y-6 max-w-3xl">
-      <div className="lg:hidden">
-        <BackLink to="/admin/settings">Settings</BackLink>
-      </div>
-      <PageHeader
-        icon={GlobeAltIcon}
-        title="Domains"
-        description="Your own hostname for this workspace"
-      />
+    <SettingsPage
+      page="/admin/settings/domains"
+      description="Your own hostname for this workspace."
+    >
       {!cloudEnabled || !allowed ? (
         <p className="text-sm text-muted-foreground">
-          Custom domains are available only in a Quackback Cloud workspace.
+          Custom domains are not enabled for this workspace.
         </p>
       ) : (
         <>
@@ -151,6 +146,6 @@ function DomainsSettingsPage() {
           />
         </>
       )}
-    </div>
+    </SettingsPage>
   )
 }

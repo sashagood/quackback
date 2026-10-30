@@ -13,13 +13,18 @@
  * reason.
  */
 import { useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { useServerFn } from '@tanstack/react-start'
 import { toast } from 'sonner'
 import { CheckCircleIcon, ClockIcon, ExclamationTriangleIcon } from '@heroicons/react/24/solid'
 import { Button } from '@/components/ui/button'
 import { TimeAgo } from '@/components/ui/time-ago'
 import { SettingsCard } from '@/components/admin/settings/settings-card'
-import { setProviderCredentialsFn } from '@/lib/server/functions/sso'
+import { ConfirmDialog } from '@/components/shared/confirm-dialog'
+import {
+  setIdentityProviderRedirectStyleFn,
+  setProviderCredentialsFn,
+} from '@/lib/server/functions/sso'
 import type { IdentityProvider } from '@/lib/server/domains/settings/identity-providers.service'
 import { previewClaimMapping } from '@/lib/shared/sso-mapping-preview'
 import { diffClaimMappingOperations, mappingSaveRisks } from '@/lib/shared/sso-claim-mapping-edit'
@@ -32,8 +37,10 @@ import {
 } from './connection-form'
 import { TestDetails } from './outcome-preview-rail'
 import {
+  IDENTITY_PROVIDERS_KEY,
   getConnectionTestState,
   mergeClaimMapping,
+  redirectUriFor,
   reportMissingIdpFields,
   withAllowMissingEmail,
 } from './provider-shared'
@@ -93,17 +100,17 @@ function ConnectionSummary({
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0 space-y-1 text-sm">
           {failure !== undefined ? (
-            <p className="flex items-start gap-1.5 font-medium text-amber-700 dark:text-amber-400">
+            <p className="flex items-start gap-1.5 font-medium text-warning">
               <ExclamationTriangleIcon className="mt-0.5 size-4 shrink-0" />
               {failureSummary(failure)}
             </p>
           ) : state.kind === 'verified' && who ? (
             <>
               <p className="flex flex-wrap items-center gap-x-1.5 font-medium">
-                <CheckCircleIcon className="size-4 shrink-0 text-green-600 dark:text-green-400" />
+                <CheckCircleIcon className="size-4 shrink-0 text-success" />
                 <span>Connected as {who}</span>
                 <span className="font-normal text-muted-foreground">
-                  · Tested <TimeAgo date={state.testedAt} />
+                  · Tested <TimeAgo date={state.testedAt} locale="en" />
                 </span>
               </p>
               {capture?.identity?.email && who !== capture.identity.email && (
@@ -112,11 +119,11 @@ function ConnectionSummary({
             </>
           ) : state.kind === 'verified' ? (
             <p className="flex items-center gap-1.5 font-medium">
-              <CheckCircleIcon className="size-4 shrink-0 text-green-600 dark:text-green-400" />
-              Connected · Tested <TimeAgo date={state.testedAt} />
+              <CheckCircleIcon className="size-4 shrink-0 text-success" />
+              Connected · Tested <TimeAgo date={state.testedAt} locale="en" />
             </p>
           ) : state.kind === 'stale' ? (
-            <p className="flex items-center gap-1.5 font-medium text-amber-700 dark:text-amber-400">
+            <p className="flex items-center gap-1.5 font-medium text-warning">
               <ClockIcon className="size-4 shrink-0" />
               Connection changed since the last test. Test again before requiring SSO.
             </p>
@@ -153,13 +160,13 @@ function failureSummary(identity: ProfileOutcome | null): string {
   if (identity?.kind === 'identity' || identity?.kind === 'placeholder_required') {
     return 'The last test failed with the previous settings. Test again to confirm the fix.'
   }
-  return 'The last test could not identify the account. Check the profile fields under User details, then test again.'
+  return 'The last test could not identify the account. Check the fields under Profile, then test again.'
 }
 
 /**
  * The one test failure an admin can fix from here: the account has no email
  * and the provider does not allow that. Everything else (wrong claim path,
- * missing identifier) is a User details problem and is explained there.
+ * missing identifier) is a Profile problem and is explained there.
  */
 function AllowMissingEmailOffer({ provider }: { provider: IdentityProvider }) {
   const { saving, saveClaimMapping } = useProviderSave(provider)
@@ -175,18 +182,18 @@ function AllowMissingEmailOffer({ provider }: { provider: IdentityProvider }) {
         operations: diffClaimMappingOperations(provider.claimMapping, proposed),
         acknowledgeAdminRules: mappingSaveRisks(provider.claimMapping, proposed).hasAdminRules,
       },
-      'People can now sign in without an email address.'
+      'Users can now sign in without an email address.'
     )
   }
 
   return (
-    <div className="space-y-2 rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2.5 text-sm">
+    <div className="space-y-2 rounded-md border border-warning/30 bg-warning/5 px-3 py-2.5 text-sm">
       <p>
-        If your provider does not release email addresses, you can let people sign in without one.
+        If your provider does not release email addresses, you can let users sign in without one.
         They get a permanent placeholder address and are asked for a real one afterwards.
       </p>
       <Button type="button" size="sm" variant="outline" disabled={saving} onClick={allow}>
-        Let people sign in without an email address
+        Let users sign in without an email address
       </Button>
     </div>
   )
@@ -241,6 +248,12 @@ function ConnectionEditor({
         draft={draft}
         onChange={setDraft}
         registrationId={provider.registrationId}
+        redirectStyle={provider.redirectStyle}
+        redirectAction={
+          provider.redirectStyle === 'legacy' ? (
+            <SwitchRedirectUri provider={provider} baseUrl={baseUrl} disabled={busy} />
+          ) : undefined
+        }
         baseUrl={baseUrl}
         disabled={busy}
         existing
@@ -258,6 +271,73 @@ function ConnectionEditor({
           Save and test
         </Button>
       </div>
+    </div>
+  )
+}
+
+/**
+ * A provider set up before the callback path moved keeps sending the redirect
+ * URI its IdP already has. This moves it to the current one, once the admin
+ * has registered that URI at the IdP; until then sign-in would be refused.
+ */
+function SwitchRedirectUri({
+  provider,
+  baseUrl,
+  disabled,
+}: {
+  provider: IdentityProvider
+  baseUrl: string | undefined
+  disabled: boolean
+}) {
+  const queryClient = useQueryClient()
+  const setStyle = useServerFn(setIdentityProviderRedirectStyleFn)
+  const [confirming, setConfirming] = useState(false)
+  const [switching, setSwitching] = useState(false)
+  const nextUri = redirectUriFor(baseUrl, provider.registrationId, 'current')
+
+  const handleSwitch = async () => {
+    setSwitching(true)
+    try {
+      await setStyle({ data: { id: provider.id, style: 'current' } })
+      await queryClient.invalidateQueries({ queryKey: IDENTITY_PROVIDERS_KEY })
+      setConfirming(false)
+      toast.success('Redirect URI switched. Test the connection again.')
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not switch the redirect URI.')
+    } finally {
+      setSwitching(false)
+    }
+  }
+
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-2 text-sm text-muted-foreground">
+      <p>This is the older redirect URI. Switch once the new one is added at your provider.</p>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        disabled={disabled || switching}
+        onClick={() => setConfirming(true)}
+      >
+        Switch to new URI
+      </Button>
+      <ConfirmDialog
+        open={confirming}
+        onOpenChange={setConfirming}
+        title="Switch redirect URI?"
+        description={
+          <>
+            <p>Sign-in will send this redirect URI:</p>
+            <code className="mt-2 block rounded-md border border-border/50 bg-muted/30 px-3 py-2 font-mono text-xs break-all">
+              {nextUri}
+            </code>
+            <p className="mt-2">Add it at your provider first, or sign-in will fail.</p>
+          </>
+        }
+        confirmLabel="Switch"
+        isPending={switching}
+        onConfirm={handleSwitch}
+      />
     </div>
   )
 }

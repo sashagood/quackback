@@ -98,6 +98,14 @@ const SCRATCH_DB = 'quackback_drift_check'
  */
 const EXEMPTIONS: { reason: string; pattern: RegExp; optional?: boolean }[] = [
   {
+    reason: 'workspace turn dedupe: jsonb expression member does not round-trip introspection',
+    pattern: /^CREATE UNIQUE INDEX "conversation_messages_workspace_run_sender_idx"/,
+  },
+  {
+    reason: 'workspace turn dedupe: jsonb expression member does not round-trip introspection',
+    pattern: /^DROP INDEX "conversation_messages_workspace_run_sender_idx"/,
+  },
+  {
     reason:
       'drizzle-kit composite PK column-order rewrite on PG 17; identical named key and columns',
     pattern:
@@ -194,6 +202,19 @@ const EXEMPTIONS: { reason: string; pattern: RegExp; optional?: boolean }[] = [
     pattern: /^DROP INDEX "user_name_trgm_idx"/,
   },
   {
+    // GIN pg_trgm index on posts.title for search's close-spelling fallback.
+    // Same gin_trgm_ops introspection limitation as the indexes above.
+    reason:
+      'pg_trgm GIN index on posts.title for typo-tolerant search; gin_trgm_ops opclass is not introspectable, so drizzle-kit re-emits the CREATE',
+    pattern: /^CREATE INDEX "posts_title_trgm_idx" ON "posts" USING gin /,
+  },
+  {
+    // Drop half of the same spurious pair for the partial gin_trgm index.
+    reason:
+      'pg_trgm GIN index on posts.title for typo-tolerant search; drizzle-kit cannot round-trip the partial gin_trgm index, so it re-emits the DROP',
+    pattern: /^DROP INDEX "posts_title_trgm_idx"/,
+  },
+  {
     // Case-insensitive unique index on lower(name) (0156). drizzle-kit cannot
     // express a functional/expression index, so it reads the index as undeclared
     // and wants to drop it. The plain unique on name is declared in TS separately.
@@ -204,8 +225,9 @@ const EXEMPTIONS: { reason: string; pattern: RegExp; optional?: boolean }[] = [
     // HNSW cosine indexes over embedding columns (migrations 0203 + 0209).
     // drizzle-kit cannot round-trip an hnsw partial index (vector_cosine_ops
     // opclass + partial predicate), so it emits a spurious drop/create pair for
-    // every one. Each listed index is created by a migration, so a genuinely
-    // unmigrated hnsw index (a new, unlisted name) still fails the check.
+    // every one. Each listed index is created by a migration or by
+    // CONCURRENT_INDEX_SPECS, so a genuinely unbuilt hnsw index (a new,
+    // unlisted name) still fails the check.
     reason:
       'hnsw vector_cosine_ops partial index is not faithfully round-tripped by drizzle-kit; drop half of the spurious pair',
     pattern:
@@ -379,10 +401,11 @@ async function main(): Promise<number> {
     console.log('Applying all migrations to the scratch database...')
     // The same code path production boot uses (migrate + system seed); the
     // seed's DML cannot affect the DDL diff.
-    // Concurrent indexes and the post-condition sweep are deliberately off:
-    // this check diffs DDL that drizzle-kit can express, while concurrent
-    // indexes are raw-SQL-owned and verified separately by schema operations.
-    await runMigrations(scratchUrl(), { concurrentIndexes: false, verify: false })
+    // The concurrent index step runs too, because the HNSW and trigram indexes
+    // exist only through it (no migration builds them), and every booted
+    // database has run it. The post-condition sweep is off: it is verified
+    // separately by schema operations.
+    await runMigrations(scratchUrl(), { verify: false })
 
     console.log('Diffing live schema against the Drizzle TS schema...')
     // pushSchema reads `.rows` off execute() results, but the postgres-js

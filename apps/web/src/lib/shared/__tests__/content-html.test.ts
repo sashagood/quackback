@@ -10,6 +10,22 @@ import type { JSONContent } from '@tiptap/core'
 import { generateContentHTML } from '../content-html'
 
 describe('generateContentHTML', () => {
+  it('preserves an ordered list start while refusing invalid attribute values', () => {
+    expect(generateContentHTML({ type: 'orderedList', attrs: { start: 7 } })).toBe(
+      '<ol start="7"></ol>'
+    )
+    for (const start of ['7" onclick="alert(1)', Infinity, 1000000000, 1.5]) {
+      expect(generateContentHTML({ type: 'orderedList', attrs: { start } })).toBe('<ol></ol>')
+    }
+  })
+  it('preserves zero and negative list starts', () => {
+    for (const start of [0, -3, 999999999]) {
+      expect(generateContentHTML({ type: 'orderedList', attrs: { start } })).toBe(
+        `<ol start="${start}"></ol>`
+      )
+    }
+  })
+
   it('renders an uploaded video with native controls', () => {
     const html = generateContentHTML({
       type: 'doc',
@@ -244,17 +260,12 @@ describe('generateContentHTML', () => {
     expect(html).not.toContain(':crossed_fingers:')
   })
 
-  it('emits a :shortcode: placeholder for a name-only emoji node (client upgrades it)', () => {
+  it('keeps the anchor id when the root node is itself a heading', () => {
     const html = generateContentHTML({
-      type: 'doc',
-      content: [
-        {
-          type: 'paragraph',
-          content: [{ type: 'emoji', attrs: { name: 'crossed_fingers' } }],
-        },
-      ],
+      type: 'heading',
+      attrs: { level: 2 },
+      content: [{ type: 'text', text: 'Getting started' }],
     })
-    expect(html).toContain(':crossed_fingers:')
-    expect(html).toContain('data-name="crossed_fingers"')
+    expect(html).toBe('<h2 id="getting-started">Getting started</h2>')
   })
 })

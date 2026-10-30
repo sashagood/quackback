@@ -13,7 +13,8 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { render, screen } from '@testing-library/react'
-import { QueryClient } from '@tanstack/react-query'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { IntlProvider } from 'react-intl'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { PERMISSIONS, SYSTEM_ROLE_PERMISSIONS } from '@/lib/shared/permissions'
 import { scanSourceFile } from '@/lib/server/policy/authz-matrix/scan'
@@ -111,7 +112,13 @@ function renderPage(loaderData: Record<string, unknown>, tab?: string) {
   vi.spyOn(Route, 'useLoaderData').mockReturnValue(loaderData as never)
   vi.spyOn(Route, 'useSearch').mockReturnValue({ tab } as never)
   vi.spyOn(Route, 'useNavigate').mockReturnValue(vi.fn() as never)
-  return render(<Page />)
+  return render(
+    <IntlProvider locale="en" defaultLocale="en">
+      <QueryClientProvider client={new QueryClient()}>
+        <Page />
+      </QueryClientProvider>
+    </IntlProvider>
+  )
 }
 
 beforeEach(() => {
@@ -132,6 +139,8 @@ describe('members settings page', () => {
     const data = await runLoader(MANAGER)
     expect(reads.sort()).toEqual(['fetchTeamMembersAndInvitations', 'listRolesFn'])
     expect(data.canManageTeams).toBe(false)
+    // A Manager sees the roster but cannot add people to it.
+    expect(data.canManageMembers).toBe(false)
   })
 
   it('warms the teams too for a role that may manage them', async () => {
@@ -142,6 +151,7 @@ describe('members settings page', () => {
       'listTeamsAdminFn',
     ])
     expect(data.canManageTeams).toBe(true)
+    expect(data.canManageMembers).toBe(true)
   })
 
   it('does not offer a Manager the Teams tab, even from a link to it', async () => {

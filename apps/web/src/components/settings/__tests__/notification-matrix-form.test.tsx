@@ -9,13 +9,33 @@
  * settings page has no such loader and keeps fetching on mount.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, cleanup } from '@testing-library/react'
+import { render as baseRender, screen, cleanup, fireEvent, waitFor } from '@testing-library/react'
+import { IntlProvider } from 'react-intl'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { createAutosaveMutationCache } from '@/lib/client/autosave'
 
 const getNotificationPreferencesFn = vi.hoisted(() => vi.fn())
+const updateNotificationPreferencesFn = vi.hoisted(() => vi.fn())
+const toastError = vi.hoisted(() => vi.fn())
 vi.mock('@/lib/server/functions/user', () => ({
   getNotificationPreferencesFn: (...args: unknown[]) => getNotificationPreferencesFn(...args),
-  updateNotificationPreferencesFn: vi.fn(),
+  updateNotificationPreferencesFn: (...args: unknown[]) => updateNotificationPreferencesFn(...args),
 }))
+vi.mock('sonner', () => ({ toast: { error: toastError } }))
+
+function render(ui: React.ReactElement) {
+  const client = new QueryClient({
+    mutationCache: createAutosaveMutationCache(),
+    defaultOptions: { mutations: { retry: false } },
+  })
+  return baseRender(
+    <QueryClientProvider client={client}>
+      <IntlProvider locale="en" defaultLocale="en">
+        {ui}
+      </IntlProvider>
+    </QueryClientProvider>
+  )
+}
 
 import { NotificationMatrixForm } from '../notification-matrix-form'
 
@@ -29,6 +49,8 @@ const preferences = {
 beforeEach(() => {
   getNotificationPreferencesFn.mockReset()
   getNotificationPreferencesFn.mockResolvedValue(preferences)
+  updateNotificationPreferencesFn.mockReset()
+  toastError.mockReset()
 })
 
 afterEach(cleanup)
@@ -48,5 +70,105 @@ describe('NotificationMatrixForm', () => {
 
     expect(await screen.findByLabelText('Pause all email notifications')).toBeTruthy()
     expect(getNotificationPreferencesFn).toHaveBeenCalledTimes(1)
+  })
+
+  it('offers in-app and email only, with line tabs', () => {
+    render(<NotificationMatrixForm surface="admin" initialPreferences={preferences} />)
+
+    expect(screen.getByText('In-app')).toBeTruthy()
+    expect(screen.getByText('Email')).toBeTruthy()
+    expect(screen.queryByText('Push')).toBeNull()
+    expect(screen.queryByText('Soon')).toBeNull()
+    expect(document.querySelector('[data-slot="tabs"]')?.getAttribute('data-variant')).toBe('line')
+  })
+
+  it('reverts a failed toggle and shows the one autosave toast', async () => {
+    updateNotificationPreferencesFn.mockRejectedValue(new Error('boom'))
+    render(<NotificationMatrixForm surface="admin" initialPreferences={preferences} />)
+
+    const toggle = screen.getByLabelText('Pause all email notifications')
+    expect(toggle.getAttribute('aria-checked')).toBe('false')
+    fireEvent.click(toggle)
+
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith("Couldn't save. Try again."))
+    expect(toastError).toHaveBeenCalledTimes(1)
+    await waitFor(() =>
+      expect(
+        screen.getByLabelText('Pause all email notifications').getAttribute('aria-checked')
+      ).toBe('false')
+    )
+    expect(screen.queryByText('boom')).toBeNull()
+  })
+
+  it('saves a toggled cell with the full matrix', async () => {
+    updateNotificationPreferencesFn.mockResolvedValue({ ...preferences })
+    render(<NotificationMatrixForm surface="admin" initialPreferences={preferences} />)
+
+    const cell = screen
+      .getAllByRole('switch')
+      .find((el) => / - Email$/.test(el.getAttribute('aria-label') ?? ''))!
+    expect(cell.getAttribute('aria-checked')).toBe('true')
+    fireEvent.click(cell)
+
+    await waitFor(() => expect(updateNotificationPreferencesFn).toHaveBeenCalledTimes(1))
+    const { data } = updateNotificationPreferencesFn.mock.calls[0][0] as {
+      data: { matrix: Record<string, { email?: boolean; inApp?: boolean }> }
+    }
+    const entries = Object.values(data.matrix)
+    expect(entries).toHaveLength(1)
+    expect(entries[0].email).toBe(false)
+  })
+
+  it('shows its own saving indicator on the portal, where there is no page header', async () => {
+    let resolve!: (v: unknown) => void
+    updateNotificationPreferencesFn.mockReturnValue(new Promise((r) => (resolve = r)))
+    render(<NotificationMatrixForm surface="portal" initialPreferences={preferences} />)
+    expect(screen.queryByRole('status', { name: 'Saving' })).toBeNull()
+
+    fireEvent.click(screen.getByLabelText('Pause all email notifications'))
+    expect(await screen.findByRole('status', { name: 'Saving' })).toBeTruthy()
+
+    resolve({ ...preferences, emailMuted: true })
+    await waitFor(() => expect(screen.queryByRole('status', { name: 'Saving' })).toBeNull())
+  })
+
+  it('leaves the saving indicator to the page header on the admin surface', async () => {
+    updateNotificationPreferencesFn.mockReturnValue(new Promise(() => {}))
+    render(<NotificationMatrixForm surface="admin" initialPreferences={preferences} />)
+    fireEvent.click(screen.getByLabelText('Pause all email notifications'))
+    await waitFor(() => expect(updateNotificationPreferencesFn).toHaveBeenCalled())
+    expect(screen.queryByRole('status', { name: 'Saving' })).toBeNull()
+  })
+})
+
+describe('NotificationMatrixForm: setup tips', () => {
+  const tipsOff = { ...preferences, matrix: { onboarding_tips: { email: false } } }
+
+  it('stays quiet while setup tips are on', () => {
+    render(<NotificationMatrixForm surface="portal" initialPreferences={preferences} />)
+
+    expect(screen.queryByLabelText('Setup tips by email')).toBeNull()
+  })
+
+  it('offers the way back after "Stop setup tips", and turns them back on', async () => {
+    updateNotificationPreferencesFn.mockImplementation(async ({ data }) => ({
+      ...tipsOff,
+      ...data,
+    }))
+    render(<NotificationMatrixForm surface="portal" initialPreferences={tipsOff} />)
+
+    const toggle = screen.getByLabelText('Setup tips by email')
+    expect(toggle.getAttribute('aria-checked')).toBe('false')
+    fireEvent.click(toggle)
+
+    await waitFor(() =>
+      expect(updateNotificationPreferencesFn).toHaveBeenCalledWith({
+        data: { matrix: { onboarding_tips: { email: true } } },
+      })
+    )
+    // The row stays put once it is back on, so the change can be seen.
+    await waitFor(() =>
+      expect(screen.getByLabelText('Setup tips by email').getAttribute('aria-checked')).toBe('true')
+    )
   })
 })

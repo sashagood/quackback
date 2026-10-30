@@ -116,6 +116,7 @@ function makeProvider(over: Partial<IdentityProvider>): IdentityProvider {
     autoCreateUsers: true,
     autoProvisionRole: 'user',
     claimMapping: null,
+    redirectStyle: 'current',
     showButton: false,
     logoKey: null,
     logoUrl: null,
@@ -184,6 +185,12 @@ describe('<IdentityProvidersSection>', () => {
     expect(screen.getByTitle('SSO enforced for beta.com')).toBeInTheDocument()
   })
 
+  it('draws providers as hairline list rows, not boxed cards', () => {
+    renderSection()
+    expect(document.querySelectorAll('[data-slot="settings-list-row"]')).toHaveLength(2)
+    expect(document.querySelector('[data-slot="settings-list"]')).not.toBeNull()
+  })
+
   it('shows no domain chips for a provider with no verified domains', () => {
     renderSection()
     // The old "no domains" filler is gone; button providers show no domain text.
@@ -192,7 +199,7 @@ describe('<IdentityProvidersSection>', () => {
 })
 
 describe('plan gate', () => {
-  it('hides Add provider and names Enterprise when SSO is not entitled', () => {
+  it('hides New provider and names Enterprise when SSO is not entitled', () => {
     const qc = new QueryClient()
     qc.setQueryData(['settings', 'identityProviders'], [buttonProvider, routedProvider])
     render(
@@ -200,15 +207,50 @@ describe('plan gate', () => {
         <IdentityProvidersSection tierEnabled={false} enabledMethodCount={5} />
       </QueryClientProvider>
     )
-    expect(screen.queryByRole('link', { name: /add provider/i })).toBeNull()
+    expect(screen.queryByRole('link', { name: /new provider/i })).toBeNull()
     expect(screen.getByText(/Single sign-on is an Enterprise feature/)).toBeTruthy()
+  })
+
+  function renderWithoutTier() {
+    const qc = new QueryClient()
+    qc.setQueryData(['settings', 'identityProviders'], [buttonProvider, routedProvider])
+    return render(
+      <QueryClientProvider client={qc}>
+        <IdentityProvidersSection tierEnabled={false} enabledMethodCount={5} />
+      </QueryClientProvider>
+    )
+  }
+
+  it('still lists existing providers so an enabled one can be switched off', async () => {
+    renderWithoutTier()
+    expect(screen.getByText('Acme SSO')).toBeTruthy()
+    fireEvent.click(screen.getByRole('switch', { name: /enable acme sso/i }))
+    await waitFor(() => expect(upsertSpy).toHaveBeenCalledTimes(1))
+    expect(upsertSpy.mock.calls[0][0].data).toMatchObject({
+      id: routedProvider.id,
+      enabled: false,
+    })
+  })
+
+  it('locks the switch of a disabled provider, since turning it on needs the tier', () => {
+    renderWithoutTier()
+    const toggle = screen.getByRole('switch', { name: /enable customer login/i })
+    expect(toggle).toBeDisabled()
+    fireEvent.click(toggle)
+    expect(upsertSpy).not.toHaveBeenCalled()
+  })
+
+  it('omits the Configure link without the tier', () => {
+    renderWithoutTier()
+    expect(screen.getByText('Acme SSO')).toBeTruthy()
+    expect(screen.queryByRole('link', { name: /configure acme sso/i })).toBeNull()
   })
 })
 
 describe('links to the provider pages', () => {
-  it('sends Add provider to the create page', () => {
+  it('sends New provider to the create page', () => {
     renderSection()
-    expect(screen.getByRole('link', { name: /add provider/i })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: /new provider/i })).toHaveAttribute(
       'href',
       '/admin/settings/security/sso/new'
     )
@@ -255,5 +297,51 @@ describe('enable toggle on the list row', () => {
   it('allows disabling a provider when other methods remain', () => {
     renderSection(3)
     expect(screen.getByRole('switch', { name: /enable acme sso/i })).not.toBeDisabled()
+  })
+})
+
+describe('last-method guard depends on the SSO tier', () => {
+  // Without the tier the method count leaves identity providers out, so a
+  // count of 1 is the built-in or social method, not the SSO provider.
+  it('locks the last working method while the tier is on', () => {
+    renderSection(1)
+    const toggle = screen.getByRole('switch', { name: /enable acme sso/i })
+    expect(toggle).toBeDisabled()
+    expect(toggle.parentElement).toHaveAttribute(
+      'title',
+      'At least one sign-in method must stay enabled.'
+    )
+  })
+
+  it('lets a stale provider be switched off while the tier is off', async () => {
+    const qc = new QueryClient()
+    qc.setQueryData(['settings', 'identityProviders'], [buttonProvider, routedProvider])
+    render(
+      <QueryClientProvider client={qc}>
+        <IdentityProvidersSection tierEnabled={false} enabledMethodCount={1} />
+      </QueryClientProvider>
+    )
+    const toggle = screen.getByRole('switch', { name: /enable acme sso/i })
+    expect(toggle).not.toBeDisabled()
+    fireEvent.click(toggle)
+    await waitFor(() => expect(upsertSpy).toHaveBeenCalledTimes(1))
+    expect(upsertSpy.mock.calls[0][0].data).toMatchObject({
+      id: routedProvider.id,
+      enabled: false,
+    })
+  })
+})
+
+describe('empty list', () => {
+  it('shows the shared empty state with a New provider action', () => {
+    const qc = new QueryClient()
+    qc.setQueryData(['settings', 'identityProviders'], [])
+    render(
+      <QueryClientProvider client={qc}>
+        <IdentityProvidersSection tierEnabled enabledMethodCount={5} />
+      </QueryClientProvider>
+    )
+    expect(screen.getByText('No providers yet')).toBeInTheDocument()
+    expect(screen.getAllByRole('link', { name: /new provider/i }).length).toBeGreaterThan(0)
   })
 })

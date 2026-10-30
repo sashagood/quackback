@@ -25,6 +25,9 @@ import {
   segments,
   visitorDevices,
   asc,
+  or,
+  principalRoleAssignments,
+  roles,
 } from '@/lib/server/db'
 import type { PrincipalId, SegmentId } from '@quackback/ids'
 import { InternalError } from '@/lib/shared/errors'
@@ -32,10 +35,14 @@ import { realEmail } from '@/lib/shared/anonymous-email'
 import { truncate } from '@/lib/shared/utils/string'
 import { logger } from '@/lib/server/logger'
 import { resolveUserAvatarUrl } from '@/lib/server/domains/principals/principal-display'
+import { hasSignedInSql } from '@/lib/server/domains/principals/team-promotion'
+import { presetForLegacyRole } from '@/lib/shared/permissions'
+import { notTestPrincipal } from '@/lib/server/test-data'
 
 const log = logger.child({ component: 'user-detail' })
 import type {
   PortalUserDetail,
+  PersonTeamRole,
   EngagedPost,
   EngagementType,
   UserSegmentSummary,
@@ -81,6 +88,30 @@ async function fetchSegmentsForUser(
   return map
 }
 
+/**
+ * A teammate's tier plus the workspace-wide grant when it is not the tier's
+ * default preset (a custom role, or a different system role).
+ */
+async function resolveTeamRole(
+  principalId: PrincipalId,
+  role: string
+): Promise<PersonTeamRole | null> {
+  if (role !== 'admin' && role !== 'member') return null
+  const [assigned] = await db
+    .select({ id: roles.id, key: roles.key, name: roles.name })
+    .from(principalRoleAssignments)
+    .innerJoin(roles, eq(roles.id, principalRoleAssignments.roleId))
+    .where(
+      and(
+        eq(principalRoleAssignments.principalId, principalId),
+        isNull(principalRoleAssignments.teamId)
+      )
+    )
+    .limit(1)
+  if (!assigned || assigned.key === presetForLegacyRole(role)) return { role }
+  return { role, roleId: assigned.id, roleName: assigned.name }
+}
+
 // ---------------------------------------------------------------------------
 // Public function
 // ---------------------------------------------------------------------------
@@ -91,10 +122,21 @@ async function fetchSegmentsForUser(
  * Returns user info and all posts they've engaged with (authored, commented on, or voted on).
  */
 export async function getPortalUserDetail(
-  principalId: PrincipalId
+  principalId: PrincipalId,
+  opts?: {
+    /** Also find identified teammates (the admin people page shows a person after they join the team). */
+    includeTeammates?: boolean
+  }
 ): Promise<PortalUserDetail | null> {
   try {
-    // Get principal with user details (filter for role='user')
+    // Portal users (role='user'); with includeTeammates also human teammates,
+    // never Cloud support or service principals.
+    const roleWhere = opts?.includeTeammates
+      ? or(
+          eq(principal.role, 'user'),
+          and(inArray(principal.role, ['admin', 'member']), eq(principal.type, 'user'))
+        )!
+      : eq(principal.role, 'user')
     const principalResult = await db
       .select({
         principalId: principal.id,
@@ -106,6 +148,8 @@ export async function getPortalUserDetail(
         emailVerified: user.emailVerified,
         metadata: user.metadata,
         principalType: principal.type,
+        role: principal.role,
+        hasSignedIn: hasSignedInSql(),
         contactEmail: principal.contactEmail,
         country: user.country,
         joinedAt: principal.createdAt,
@@ -113,7 +157,7 @@ export async function getPortalUserDetail(
       })
       .from(principal)
       .innerJoin(user, eq(principal.userId, user.id))
-      .where(and(eq(principal.id, principalId), eq(principal.role, 'user')))
+      .where(and(eq(principal.id, principalId), roleWhere, notTestPrincipal(principal.id)))
       .limit(1)
 
     if (principalResult.length === 0) {
@@ -121,6 +165,7 @@ export async function getPortalUserDetail(
     }
 
     const principalData = principalResult[0]
+    const realPost = and(isNull(posts.deletedAt), notTestPrincipal(posts.principalId))
 
     // Run independent queries in parallel for better performance
     const [authoredPosts, commentedPostIds, votedPostIds] = await Promise.all([
@@ -145,7 +190,7 @@ export async function getPortalUserDetail(
         .from(posts)
         .innerJoin(boards, eq(posts.boardId, boards.id))
         .leftJoin(postStatuses, eq(postStatuses.id, posts.statusId))
-        .where(and(eq(posts.principalId, principalData.principalId), isNull(posts.deletedAt)))
+        .where(and(eq(posts.principalId, principalData.principalId), realPost))
         .orderBy(desc(posts.createdAt))
         .limit(100),
 
@@ -157,9 +202,7 @@ export async function getPortalUserDetail(
         })
         .from(postComments)
         .innerJoin(posts, eq(posts.id, postComments.postId))
-        .where(
-          and(eq(postComments.principalId, principalData.principalId), isNull(posts.deletedAt))
-        )
+        .where(and(eq(postComments.principalId, principalData.principalId), realPost))
         .groupBy(postComments.postId)
         .limit(100),
 
@@ -171,7 +214,7 @@ export async function getPortalUserDetail(
         })
         .from(postVotes)
         .innerJoin(posts, eq(posts.id, postVotes.postId))
-        .where(and(eq(postVotes.principalId, principalData.principalId), isNull(posts.deletedAt)))
+        .where(and(eq(postVotes.principalId, principalData.principalId), realPost))
         .orderBy(desc(postVotes.createdAt))
         .limit(100),
     ])
@@ -210,7 +253,7 @@ export async function getPortalUserDetail(
             .from(posts)
             .innerJoin(boards, eq(posts.boardId, boards.id))
             .leftJoin(postStatuses, eq(postStatuses.id, posts.statusId))
-            .where(and(inArray(posts.id, otherPostIds), isNull(posts.deletedAt)))
+            .where(and(inArray(posts.id, otherPostIds), realPost))
         : [],
 
       // Get comment counts for all engaged posts in one query
@@ -222,7 +265,11 @@ export async function getPortalUserDetail(
             })
             .from(postComments)
             .where(
-              and(inArray(postComments.postId, allCommentPostIds), isNull(postComments.deletedAt))
+              and(
+                inArray(postComments.postId, allCommentPostIds),
+                isNull(postComments.deletedAt),
+                notTestPrincipal(postComments.principalId)
+              )
             )
             .groupBy(postComments.postId)
         : [],
@@ -302,6 +349,7 @@ export async function getPortalUserDetail(
     const commentCount = engagementData.commentedPostIds.length
     const voteCount = engagementData.votedPostIds.length
 
+    const teamRole = await resolveTeamRole(principalData.principalId, principalData.role)
     const segmentMap = await fetchSegmentsForUser([principalData.principalId])
     const userSegmentList = segmentMap.get(principalData.principalId) ?? []
 
@@ -345,6 +393,8 @@ export async function getPortalUserDetail(
       voteCount,
       engagedPosts,
       segments: userSegmentList,
+      teamRole,
+      hasSignedIn: Boolean(principalData.hasSignedIn),
     }
   } catch (error) {
     log.error({ err: error }, 'failed to get portal user detail')

@@ -11,10 +11,12 @@ import type { OfficeHoursConfig } from '@/lib/shared/conversation/types'
 import type { WidgetTranslations } from '@/lib/shared/widget/translations'
 import type { StatusSettings } from '@/lib/shared/status-settings'
 import type { OidcSignInButton } from '@/lib/shared/oidc-sign-in-button'
+import type { OidcRedirectStyle } from '@/lib/shared/oidc-redirect'
 // Vite aliases this to a no-op stub for the client bundle (see
 // logger.client-stub.ts), so it is safe for this otherwise client-bundled
 // module to import it for the one server-side parse-failure log below.
 import { logger } from '@/lib/server/logger'
+import { DEFAULT_WELCOME_MESSAGE } from '@/lib/shared/conversation/default-greeting'
 
 const log = logger.child({ component: 'settings-types' })
 
@@ -125,6 +127,14 @@ export interface AuthConfig {
    * existing workspaces pre-migration aren't suddenly locked out.
    */
   twoFactor?: { required: boolean }
+  /**
+   * Which callback URL each OIDC provider sends as its redirect URI, keyed by
+   * the provider's `registrationId`. A provider with no entry is `current`; see
+   * `lib/shared/oidc-redirect.ts`. `legacy` is stamped by migration 0279 and the
+   * custom-oidc startup backfill for providers registered before the callback
+   * moved; an admin switch changes it and deleting the provider removes it.
+   */
+  oidcRedirectStyles?: Record<string, OidcRedirectStyle>
 }
 
 /**
@@ -444,11 +454,13 @@ export interface ThemeColors {
   mutedForeground?: string
   accent?: string
   accentForeground?: string
+  accentInk?: string
   destructive?: string
   destructiveForeground?: string
   border?: string
   input?: string
   ring?: string
+  success?: string
   sidebarBackground?: string
   sidebarForeground?: string
   sidebarPrimary?: string
@@ -462,6 +474,15 @@ export interface ThemeColors {
   chart3?: string
   chart4?: string
   chart5?: string
+  fontSans?: string
+  shadow2xs?: string
+  shadowXs?: string
+  shadowSm?: string
+  shadow?: string
+  shadowMd?: string
+  shadowLg?: string
+  shadowXl?: string
+  shadow2xl?: string
   /** Border radius CSS variable value */
   radius?: string
 }
@@ -708,6 +729,14 @@ export interface WidgetConfig {
   /** Per-locale overrides of the messenger welcome/offline message. The base
    *  fields are the fallback. */
   translations?: WidgetTranslations
+  /** Count pageviews from the host page the widget is embedded on. Absent
+   *  resolves to on where the plan includes visitor analytics; the embed
+   *  receives false wherever the plan does not include it. */
+  visitorAnalytics?: boolean
+  /** Store a durable device id in the visitor's browser so returning visitors
+   *  are recognised. Absent resolves to on where the plan includes visitor
+   *  analytics. Only has effect while `visitorAnalytics` resolves to on. */
+  visitorDeviceTracking?: boolean
 }
 
 /**
@@ -733,7 +762,7 @@ export type PublicWidgetConfig = Pick<
 
 export const DEFAULT_MESSENGER_CONFIG: MessengerConfig = {
   enabled: false,
-  welcomeMessage: 'Hi! 👋 How can we help you today?',
+  welcomeMessage: DEFAULT_WELCOME_MESSAGE,
   offlineMessage: "We're away right now. Leave a message and we'll get back to you by email.",
   // AI-first: identity on, and Quinn answers when a model is configured.
   // Admins pause replies under Automation → Agent. The widget master stays
@@ -800,6 +829,8 @@ export interface UpdateWidgetConfigInput {
   messenger?: Partial<MessengerConfig>
   home?: WidgetHomeConfig
   translations?: WidgetTranslations
+  visitorAnalytics?: boolean
+  visitorDeviceTracking?: boolean
 }
 
 // =============================================================================
@@ -1092,11 +1123,6 @@ export interface WorkspaceSettings {
    *  (dormant workspaces are scaled to 0 by the control plane; the gateway
    *  serves their hostnames). Nothing reads this anymore. */
   state: 'active' | 'suspended' | 'deleting'
-  /**
-   * Effective Labs appearance. Public: the active theme is visible in the
-   * document. Hidden experiment discovery is not included here.
-   */
-  visualTheme: 'legacy' | 'refined'
 }
 
 // =============================================================================
@@ -1124,6 +1150,9 @@ export interface FeatureFlags {
   /** Status page: public/private/segment-scoped service status with incidents,
    *  maintenance windows, uptime history, and subscriber notifications. */
   statusPage: boolean
+  /** Copilot on Home: the Home chat that answers from Copilot's knowledge and
+   *  proposes reversible settings changes. A Labs switch; on for new workspaces. */
+  copilotHome: boolean
 }
 
 /**
@@ -1199,12 +1228,61 @@ export const DEFAULT_FEATURE_FLAGS: FeatureFlags = {
   supportInbox: false,
   supportTickets: false,
   statusPage: false,
+  copilotHome: false,
+}
+
+/** Flags that are Labs switches rather than products (Settings › Labs). */
+export const LABS_FEATURE_FLAGS = ['copilotHome'] as const satisfies readonly (keyof FeatureFlags)[]
+
+/** Flags a workspace is created with: the defaults plus Copilot on Home. */
+export const NEW_WORKSPACE_FEATURE_FLAGS: FeatureFlags = {
+  ...DEFAULT_FEATURE_FLAGS,
+  copilotHome: true,
+}
+
+/**
+ * A new workspace's flags when its row was created bare (by an operator):
+ * each flag new workspaces start with that the row never stored is filled
+ * from NEW_WORKSPACE_FEATURE_FLAGS. A stored choice always stands.
+ */
+export function withNewWorkspaceFlags(
+  storedJson: string | null | undefined,
+  flags: FeatureFlags,
+  goals?: readonly FeatureFlagUseCase[]
+): FeatureFlags {
+  const stored = parseStoredFeatureFlags(storedJson)
+  const next = { ...flags }
+  for (const key of LABS_FEATURE_FLAGS) {
+    if (typeof stored[key] !== 'boolean') next[key] = NEW_WORKSPACE_FEATURE_FLAGS[key]
+  }
+  if (goals && typeof stored.changelog !== 'boolean') {
+    next.changelog = newWorkspaceBaseFlags(goals).changelog
+  }
+  return next
+}
+
+/** A new workspace's flags before its goals add their modules. */
+export function newWorkspaceBaseFlags(goals: readonly FeatureFlagUseCase[]): FeatureFlags {
+  return {
+    ...NEW_WORKSPACE_FEATURE_FLAGS,
+    changelog: goals.length === 0 || goals.includes('product_feedback'),
+  }
+}
+
+/**
+ * Flags a workspace starts with for the goals chosen at setup: the new
+ * workspace defaults plus each goal's modules. Changelog starts on only with
+ * the Feedback goal, so a support or status workspace is not handed a module
+ * it never asked for.
+ */
+export function newWorkspaceFlagsForGoals(goals: readonly FeatureFlagUseCase[]): FeatureFlags {
+  return flagsForGoals(newWorkspaceBaseFlags(goals), goals).flags
 }
 
 /** Onboarding outcomes that may turn extra products on. Kept local so this
  *  file stays free of the db package. */
 export type FeatureFlagUseCase =
-  'product_feedback' | 'customer_support' | 'help_center' | 'internal'
+  'product_feedback' | 'customer_support' | 'help_center' | 'status_page' | 'internal'
 
 /** Flags to persist for a new workspace, or to merge on (never off) when
  *  the operator picks a goal that needs a module. */
@@ -1215,6 +1293,8 @@ export function featureFlagsForUseCase(useCase?: FeatureFlagUseCase | null): Fea
     flags.supportTickets = true
   } else if (useCase === 'help_center') {
     flags.helpCenter = true
+  } else if (useCase === 'status_page') {
+    flags.statusPage = true
   }
   return flags
 }
@@ -1227,9 +1307,12 @@ export function enableFlagsForUseCase(
   const needed = featureFlagsForUseCase(useCase)
   return {
     ...current,
+    // Shipping updates belongs with collecting ideas; other goals leave it alone.
+    changelog: current.changelog || useCase === 'product_feedback',
     supportInbox: current.supportInbox || needed.supportInbox,
     supportTickets: current.supportTickets || needed.supportTickets,
     helpCenter: current.helpCenter || needed.helpCenter,
+    statusPage: current.statusPage || needed.statusPage,
   }
 }
 
@@ -1301,6 +1384,15 @@ export function flagsForGoal(
   useCase?: FeatureFlagUseCase | null
 ): { flags: FeatureFlags; enabledModules: string[] } {
   const flags = enableFlagsForUseCase(current, useCase)
+  return { flags, enabledModules: newlyEnabledProductLabels(current, flags) }
+}
+
+/** Enable the union of selected goals without disabling existing products. */
+export function flagsForGoals(
+  current: FeatureFlags,
+  goals: readonly FeatureFlagUseCase[]
+): { flags: FeatureFlags; enabledModules: string[] } {
+  const flags = goals.reduce((flags, goal) => enableFlagsForUseCase(flags, goal), current)
   return { flags, enabledModules: newlyEnabledProductLabels(current, flags) }
 }
 

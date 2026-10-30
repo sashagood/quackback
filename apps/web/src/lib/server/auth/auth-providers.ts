@@ -125,11 +125,12 @@ export const AUTH_PROVIDERS: AuthProviderDefinition[] = [
         'https://portal.azure.com/#blade/Microsoft_AAD_RegisteredApps/ApplicationsListBlade'
       ),
       {
-        key: 'workspaceKey',
-        label: 'Workspace ID',
+        key: 'tenantId',
+        label: 'Tenant ID',
         placeholder: 'common (optional)',
         sensitive: false,
-        helpText: 'Defaults to "common" for multi-workspace apps',
+        helpText:
+          'Directory (tenant) ID from Microsoft Entra, or "common", "organizations" or "consumers". Defaults to "common".',
       },
     ],
   },
@@ -224,10 +225,9 @@ export function getAuthProviderByProviderId(id: string): AuthProviderDefinition 
 }
 
 /**
- * Path to register at the IdP. Better Auth 1.7 sends every provider,
- * including generic OIDC, to `/api/auth/callback/<id>`.
- * `/api/auth/oauth2/callback/<id>` is still accepted and rewritten so a
- * return to the pre-1.7 URL can finish.
+ * Path to register at the IdP for a social provider: `/api/auth/callback/<id>`.
+ * OIDC identity providers choose theirs per provider; see
+ * `lib/shared/oidc-redirect.ts`.
  */
 export function authProviderCallbackPath(providerId: string): string {
   return `/api/auth/callback/${providerId}`
@@ -243,4 +243,39 @@ export function isAuthProviderCredentialType(type: string): boolean {
 
 export function credentialTypeForProvider(providerId: string): string {
   return `${AUTH_CREDENTIAL_PREFIX}${providerId}`
+}
+
+/**
+ * Stored credentials for a provider, with field names the definition no longer
+ * uses mapped onto the current ones.
+ */
+export function normalizeStoredAuthCredentials(
+  credentialType: string,
+  creds: Record<string, string>
+): Record<string, string> {
+  // The Microsoft tenant ID was briefly stored under `workspaceKey`.
+  if (credentialType !== `${AUTH_CREDENTIAL_PREFIX}microsoft` || !('workspaceKey' in creds)) {
+    return creds
+  }
+  const { workspaceKey, ...rest } = creds
+  return rest.tenantId ? rest : { ...rest, tenantId: workspaceKey }
+}
+
+/** Better Auth social provider options built from a provider's stored credentials. */
+export function socialProviderConfig(
+  provider: AuthProviderDefinition,
+  storedCreds: Record<string, string>
+): Record<string, unknown> {
+  const creds = normalizeStoredAuthCredentials(provider.credentialType, storedCreds)
+  const config: Record<string, unknown> = {
+    clientId: creds.clientId,
+    clientSecret: creds.clientSecret,
+  }
+  // Provider-specific fields (tenantId for Microsoft, appBundleIdentifier for Apple)
+  for (const field of provider.platformCredentials) {
+    if (field.key !== 'clientId' && field.key !== 'clientSecret' && creds[field.key]) {
+      config[field.key] = creds[field.key]
+    }
+  }
+  return config
 }

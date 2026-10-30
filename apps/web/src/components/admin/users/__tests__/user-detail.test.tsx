@@ -113,6 +113,8 @@ const BASE_USER: PortalUserDetail = {
   contactEmail: null,
   lastSeenAt: new Date('2026-04-01T12:00:00.000Z'),
   country: 'DE',
+  teamRole: null,
+  hasSignedIn: true,
   engagedPosts: [],
 }
 
@@ -170,7 +172,7 @@ describe('UserDetail', () => {
         currentMemberRole="admin"
       />
     )
-    const dashes = screen.getAllByText('—')
+    const dashes = screen.getAllByText('-')
     expect(dashes.length).toBeGreaterThanOrEqual(2)
   })
 

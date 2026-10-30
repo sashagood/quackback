@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useIntl } from 'react-intl'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import {
@@ -66,6 +67,7 @@ export function ConvertToPostDialog({
   open: controlledOpen,
   onOpenChange,
 }: ConvertToPostDialogProps) {
+  const intl = useIntl()
   const [internalOpen, setInternalOpen] = useState(false)
   const open = controlledOpen ?? internalOpen
   const setOpen = onOpenChange ?? setInternalOpen
@@ -127,7 +129,24 @@ export function ConvertToPostDialog({
       setOpen(false)
       onConverted?.()
     },
-    onError: () => toast.error('Failed to convert conversation'),
+    onError: (error) => {
+      const testConversation =
+        (error as { code?: string }).code === 'CANNOT_CONVERT_TEST_CONVERSATION' ||
+        error.message === 'Test conversations cannot be tracked as feedback'
+      toast.error(
+        intl.formatMessage(
+          testConversation
+            ? {
+                id: 'inbox.convert.error.testConversation',
+                defaultMessage: 'Test conversations cannot be tracked as feedback.',
+              }
+            : {
+                id: 'inbox.convert.error.failed',
+                defaultMessage: 'Failed to convert conversation',
+              }
+        )
+      )
+    },
   })
 
   const share = useMutation({
@@ -175,7 +194,7 @@ export function ConvertToPostDialog({
         <DialogHeader>
           <DialogTitle>Track as a feedback post</DialogTitle>
           <DialogDescription>
-            Create a post from this conversation, attributed to the customer — they'll see it in the
+            Create a post from this conversation, attributed to the customer. They'll see it in the
             conversation and get status updates.
           </DialogDescription>
         </DialogHeader>
@@ -237,7 +256,7 @@ export function ConvertToPostDialog({
           {similar.length > 0 && (
             <div className="rounded-lg border border-border/60 p-2.5">
               <p className="mb-1.5 text-xs font-medium text-muted-foreground">
-                Similar posts — upvote instead of creating a duplicate?
+                Similar posts: upvote instead of creating a duplicate?
               </p>
               <div className="flex flex-col gap-1">
                 {similar.map((p) => (

@@ -163,6 +163,7 @@ export {
   // Schema tables - auth
   account,
   accountRelations,
+  accountProfileSync,
   invitation,
   invitationRelations,
   jwks,
@@ -171,6 +172,7 @@ export {
   oauthClient,
   oauthClientRelations,
   oauthClientAssertion,
+  deviceCode,
   oauthClientResource,
   oauthClientResourceRelations,
   oauthConsent,
@@ -298,6 +300,7 @@ export {
   conversations,
   conversationsRelations,
   conversationMessages,
+  workspaceAssistantThreads,
   conversationMessagesRelations,
   conversationTags,
   conversationTagsRelations,
@@ -341,6 +344,7 @@ export {
   postSubscriptions,
   postSubscriptionsRelations,
   unsubscribeTokens,
+  onboardingEmails,
   unsubscribeTokensRelations,
   // Schema tables - sentiment
   postSentiment,
@@ -466,11 +470,21 @@ export {
   // Schema tables - assistant knowledge documents
   assistantDocuments,
   assistantDocumentsRelations,
+  files,
+  filesRelations,
   // Schema tables - assistant web sources
   assistantWebSources,
   // Schema tables - assistant pending actions
   assistantPendingActions,
   ASSISTANT_PENDING_ACTION_STATUSES,
+  APPROVAL_RISKS,
+  APPROVAL_REQUEST_CHANNELS,
+  APPROVAL_DECISION_CHANNELS,
+  APPROVAL_EXECUTION_STATES,
+  type ApprovalRisk,
+  type ApprovalRequestChannel,
+  type ApprovalDecisionChannel,
+  type ApprovalExecutionState,
   // Schema tables - assistant tool-call audit log
   assistantToolCalls,
   ASSISTANT_TOOL_CALL_STATUSES,
@@ -506,6 +520,11 @@ export {
   // Types/constants
   REACTION_EMOJIS,
   USE_CASE_TYPES,
+  // Test-customer identity kept out of every metric
+  isTestPrincipalSql,
+  notTestPrincipal,
+  notTestConversation,
+  notTestTicket,
 } from '@quackback/db'
 
 // Re-export schema types not covered by @quackback/db/types
@@ -525,6 +544,7 @@ export type {
   MacroAction,
 } from '@quackback/db'
 export type { ServiceMetadata } from '@quackback/db'
+export type { FileRecord, NewFileRecord } from '@quackback/db'
 export type { IdentityProviderClaimMapping, ClaimRoleMapping } from '@quackback/db'
 export type { PermissionKey, PermissionCategory, SystemRoleKey } from '@quackback/db'
 export type {

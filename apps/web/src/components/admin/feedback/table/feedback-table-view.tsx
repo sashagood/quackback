@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from 'react'
+import { useCallback, useEffect, type ReactNode } from 'react'
 import { useInfiniteScroll } from '@/lib/client/hooks/use-infinite-scroll'
 import { useDebouncedSearch } from '@/lib/client/hooks/use-debounced-search'
 import { Spinner } from '@/components/shared/spinner'
@@ -6,12 +6,13 @@ import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { AdminListHeader } from '@/components/admin/admin-list-header'
 import { InboxEmptyState } from '@/components/admin/feedback/inbox-empty-state'
-import { ActiveFiltersBar } from '@/components/admin/feedback/active-filters-bar'
+import { ActiveFiltersBar, AddFilterButton } from '@/components/admin/feedback/active-filters-bar'
 import { FeedbackRow } from './feedback-row'
 import type { PostListItem, PostStatusEntity, Board, PostTag } from '@/lib/shared/db-types'
 import type { TeamMember } from '@/lib/shared/types'
 import type { SegmentListItem } from '@/lib/client/hooks/use-segments-queries'
 import type { InboxFilters } from '@/components/admin/feedback/use-inbox-filters'
+import type { WidenedSearch } from '@/lib/shared/types/filters'
 import type { PostId } from '@quackback/ids'
 
 interface FeedbackTableViewProps {
@@ -31,25 +32,39 @@ interface FeedbackTableViewProps {
   onLoadMore: () => void
   hasActiveFilters: boolean
   onClearFilters: () => void
+  /** Extra controls after the Filter control (e.g. saved views) */
+  headerFilters?: React.ReactNode
+  /** The primary action, on the right of the toolbar */
   headerAction?: React.ReactNode
   onToggleStatus: (slug: string) => void
   onToggleBoard: (id: string) => void
   onToggleSegment?: (id: string) => void
   /** Duplicate counts per post (for badges) */
   duplicateCountByPostId?: Map<PostId, number>
+  /** Set when no post matched every word of the search and it was widened. */
+  searchMode?: WidenedSearch
 }
 
 const SORT_OPTIONS = [
   { value: 'newest', label: 'Newest' },
   { value: 'oldest', label: 'Oldest' },
-  { value: 'votes', label: 'Top Votes' },
+  { value: 'votes', label: 'Top votes' },
   { value: 'priority', label: 'Priority' },
 ]
+
+/** Best match leads the options while searching; it has nothing to rank otherwise. */
+const SEARCH_SORT_OPTIONS = [{ value: 'relevance', label: 'Best match' }, ...SORT_OPTIONS]
+
+const WIDENED_SEARCH_NOTES: Record<WidenedSearch, string> = {
+  most: 'No post has all your words. Showing posts with most of them.',
+  similar: 'No exact matches. Showing posts with a similar spelling.',
+}
 
 interface FeedbackListHeaderProps {
   search: string | undefined
   sort: InboxFilters['sort']
   onFiltersChange: (updates: Partial<InboxFilters>) => void
+  filters?: ReactNode
   action?: ReactNode
   children?: ReactNode
 }
@@ -62,9 +77,14 @@ function FeedbackListHeader({
   search,
   sort,
   onFiltersChange,
+  filters,
   action,
   children,
 }: FeedbackListHeaderProps) {
+  const handleSortChange = useCallback(
+    (value: string) => onFiltersChange({ sort: value as InboxFilters['sort'] }),
+    [onFiltersChange]
+  )
   const { value: searchValue, setValue: setSearchValue } = useDebouncedSearch({
     externalValue: search,
     onChange: (next) => onFiltersChange({ search: next }),
@@ -74,9 +94,11 @@ function FeedbackListHeader({
     <AdminListHeader
       searchValue={searchValue}
       onSearchChange={setSearchValue}
-      sortOptions={SORT_OPTIONS}
-      activeSort={sort}
-      onSortChange={(value) => onFiltersChange({ sort: value as InboxFilters['sort'] })}
+      searchPlaceholder="Search posts..."
+      sortOptions={search ? SEARCH_SORT_OPTIONS : SORT_OPTIONS}
+      activeSort={sort === 'relevance' && !search ? 'newest' : sort}
+      onSortChange={handleSortChange}
+      filters={filters}
       action={action}
     >
       {children}
@@ -87,10 +109,7 @@ function FeedbackListHeader({
 function TableSkeleton() {
   return (
     <div className="p-3">
-      <div
-        data-continuous-list=""
-        className="rounded-xl overflow-hidden shadow-sm divide-y divide-border/50 bg-card border border-border/50"
-      >
+      <div className="overflow-hidden divide-y divide-border/50 border-y border-t-transparent border-border/50">
         {Array.from({ length: 6 }).map((_, rowIdx) => (
           <div key={rowIdx} className="flex py-1 px-3">
             {/* Vote button */}
@@ -139,11 +158,13 @@ export function FeedbackTableView({
   onLoadMore,
   hasActiveFilters,
   onClearFilters,
+  headerFilters,
   headerAction,
   onToggleStatus,
   onToggleBoard,
   duplicateCountByPostId,
   onToggleSegment,
+  searchMode,
 }: FeedbackTableViewProps): React.ReactElement {
   const loadMoreRef = useInfiniteScroll({
     hasMore,
@@ -186,24 +207,35 @@ export function FeedbackTableView({
       search={filters.search}
       sort={filters.sort}
       onFiltersChange={onFiltersChange}
+      filters={
+        <>
+          <AddFilterButton
+            filters={filters}
+            boards={boards}
+            tags={tags}
+            statuses={statuses}
+            members={members}
+            segments={segments}
+            onToggleStatus={onToggleStatus}
+            onToggleBoard={onToggleBoard}
+            onToggleSegment={onToggleSegment}
+            onFiltersChange={onFiltersChange}
+          />
+          {headerFilters}
+        </>
+      }
       action={headerAction}
     >
-      {/* Active Filters Bar - Always visible */}
-      <div className="mt-2">
-        <ActiveFiltersBar
-          filters={filters}
-          onFiltersChange={onFiltersChange}
-          onClearAll={onClearFilters}
-          boards={boards}
-          tags={tags}
-          statuses={statuses}
-          members={members}
-          segments={segments}
-          onToggleStatus={onToggleStatus}
-          onToggleBoard={onToggleBoard}
-          onToggleSegment={onToggleSegment}
-        />
-      </div>
+      <ActiveFiltersBar
+        filters={filters}
+        onFiltersChange={onFiltersChange}
+        onClearAll={onClearFilters}
+        boards={boards}
+        tags={tags}
+        statuses={statuses}
+        members={members}
+        segments={segments}
+      />
     </FeedbackListHeader>
   )
 
@@ -258,12 +290,15 @@ export function FeedbackTableView({
     <div className="max-w-5xl w-full">
       {headerContent}
 
+      {searchMode && (
+        <p className="px-6 pt-3 text-sm text-muted-foreground">
+          {WIDENED_SEARCH_NOTES[searchMode]}
+        </p>
+      )}
+
       {/* Post List */}
       <div className="p-3">
-        <div
-          data-continuous-list=""
-          className="rounded-xl overflow-hidden shadow-sm divide-y divide-border/50 bg-card border border-border/50"
-        >
+        <div className="overflow-hidden divide-y divide-border/50 border-y border-t-transparent border-border/50">
           {filteredPosts.map((post, index) => (
             <div
               key={post.id}

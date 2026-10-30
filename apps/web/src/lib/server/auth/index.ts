@@ -11,6 +11,7 @@ import {
   twoFactor,
 } from 'better-auth/plugins'
 import { mcp } from '@better-auth/mcp'
+import { oauthDeviceAuthorization } from '@better-auth/oauth-provider'
 import { betterAuthMcpResource } from './mcp-plugin-resource'
 import { tanstackStartCookies } from 'better-auth/tanstack-start'
 import { generateId, type PrincipalId, type UserId } from '@quackback/ids'
@@ -22,9 +23,12 @@ import { getWorkspaceScope, runWithWorkspaceScope } from '@/lib/server/workspace
 import { WorkspaceKeyedCache } from '@/lib/server/workspaces/workspace-keyed'
 import type { GenericOAuthConfig } from './build-oauth-configs'
 import { guardBetterAuthUserCreation } from './signup-policy'
+import { assignSessionScope } from './session-audience'
 import { isSignInMethodEnabled } from '@/lib/shared/signin-methods'
+import { accountDisplayName } from '@/lib/shared/greeting-name'
 import { workspaceAuthTrustedOrigins } from './trusted-origins'
 import { ensureMcpOauthResource } from './ensure-mcp-oauth-resource'
+import { HTTP_DISABLED_AUTH_PATHS } from './http-disabled-paths'
 
 const log = logger.child({ component: 'auth-config' })
 
@@ -186,13 +190,14 @@ async function createAuth() {
     oauthResource: oauthResourceTable,
     oauthClientResource: oauthClientResourceTable,
     oauthClientAssertion: oauthClientAssertionTable,
+    deviceCode: deviceCodeTable,
     twoFactor: twoFactorTable,
     eq,
   } = await import('@/lib/server/db')
   const { sendPasswordResetEmail, isEmailConfigured } = await import('@quackback/email')
   const { getPlatformCredentials } =
     await import('@/lib/server/domains/platform-credentials/platform-credential.service')
-  const { getAllAuthProviders } = await import('./auth-providers')
+  const { getAllAuthProviders, socialProviderConfig } = await import('./auth-providers')
   const { getTierLimits } = await import('@/lib/server/domains/settings/tier-limits.service')
   const { getWorkspaceSettings } = await import('@/lib/server/domains/settings/settings.service')
   const { listIdentityProviders, getIdentityProviderCredentials } =
@@ -273,17 +278,22 @@ async function createAuth() {
     return minted
   }
 
-  const providerRows = await listIdentityProviders()
+  // The same row the build takes auth_config_version from, so the redirect
+  // styles match the version this instance is cached under.
+  const providerRows = await listIdentityProviders({
+    authConfig: workspaceSettings?.settings?.authConfig ?? null,
+  })
   const oidcConfigs = await buildGenericOAuthConfigs({
     providers: providerRows,
     creds: getIdentityProviderCredentials,
     tierAllowsOidc: tierLimits.features.customOidcProvider,
+    baseUrl: config.baseUrl,
     discovery: (discoveryUrl) => fetchJson(discoveryUrl),
     fetchUserInfo: (url, accessToken) => fetchJson(url, { authorization: `Bearer ${accessToken}` }),
     // Observe-then-enforce: log the discrepancy so its real rate is known
     // before any release starts refusing sign-ins over it.
-    onResolved: (registrationId, accountId, claims) => {
-      stashResolvedClaims(registrationId, accountId, claims)
+    onResolved: (registrationId, accountId, resolved) => {
+      stashResolvedClaims(registrationId, accountId, resolved)
     },
     onResolutionWarning: (registrationId, warnings) => {
       log.warn({ registrationId, warnings }, 'identity resolution discrepancy observed')
@@ -292,6 +302,16 @@ async function createAuth() {
       log.warn({ registrationId, reason }, 'identity profile resolution failed')
     },
     placeholderEmailFor: resolvePlaceholderEmail,
+    // A failure here must never block the sign-in: Better Auth then answers as
+    // it would have without the vouch.
+    onProviderEmail: async (registrationId, accountId, email) => {
+      try {
+        const { vouchForEnforcedAddress } = await import('./enforcing-provider-email')
+        await vouchForEnforcedAddress({ registrationId, accountId, email, providers: providerRows })
+      } catch (error) {
+        log.error({ err: error, registrationId }, 'enforcing provider vouch failed')
+      }
+    },
     mapProfileToUser: mapProfileClaims,
   })
   genericOAuthConfigs.push(...oidcConfigs)
@@ -305,31 +325,18 @@ async function createAuth() {
   // Observed, not enforced. Withdrawing it outright would stop existing
   // password users linking on their first SSO sign-in and start returning
   // "account not linked" — a regression for providers that are behaving
-  // perfectly well. So log which providers would lose it, size the blast radius
-  // from real installations, and flip afterwards. Two of the predicate's inputs
-  // (whether the provider asserts a verified address, and an admin override)
-  // also need a column that has not landed yet.
-  const { allowsAutoLinking } = await import('./provider-trust')
-  for (const c of oidcConfigs) {
-    trustedProviders.push(c.providerId)
-    const row = providerRows.find((p) => p.registrationId === c.providerId)
-    if (
-      row &&
-      !allowsAutoLinking({
-        lastSuccessfulTestAt: row.lastSuccessfulTestAt,
-        detailsChangedAt: row.detailsChangedAt,
-        // Not yet persisted; assumed true so the observation isolates the
-        // connection-test signal rather than flagging every provider.
-        assertsVerifiedEmail: true,
-        trustOverride: null,
-      })
-    ) {
-      log.warn(
-        { registrationId: c.providerId },
-        'provider would lose auto-linking under derived trust (no fresh connection test)'
-      )
-    }
-  }
+  // perfectly well. So note which providers the derived predicate would not
+  // trust, size the population from real installations, and flip afterwards.
+  // Two of the predicate's inputs (whether the provider asserts a verified
+  // address, and an admin override) also need a column that has not landed yet.
+  const { oidcTrustedProviderIds } = await import('./provider-trust')
+  trustedProviders.push(
+    ...oidcTrustedProviderIds(
+      oidcConfigs.map((c) => c.providerId),
+      providerRows,
+      log
+    )
+  )
 
   // Layer A registration filter: an OAuth provider is registered on
   // the Better-Auth instance only if creds exist AND `authConfig.oauth`
@@ -356,18 +363,10 @@ async function createAuth() {
     if (!isSignInMethodEnabled(unifiedOAuthConfig, provider.id)) continue
 
     // Built-in social providers
-    const providerConfig: Record<string, unknown> = {
-      clientId: creds.clientId,
-      clientSecret: creds.clientSecret,
+    socialProviders[provider.id] = {
+      ...socialProviderConfig(provider, creds),
       mapProfileToUser: mapProfileClaims,
     }
-    // Add provider-specific fields (e.g., workspaceKey for Microsoft, issuer for GitLab)
-    for (const field of provider.platformCredentials) {
-      if (field.key !== 'clientId' && field.key !== 'clientSecret' && creds[field.key]) {
-        providerConfig[field.key] = creds[field.key]
-      }
-    }
-    socialProviders[provider.id] = providerConfig
     trustedProviders.push(provider.id)
   }
 
@@ -400,6 +399,7 @@ async function createAuth() {
   // Per-endpoint hooks for Layer B/C enforcement. Imported lazily here
   // to keep the createAuth() module-loading dependency graph clean.
   const { hooksBefore, hooksAfter } = await import('./hooks')
+  const { betterAuthIpAddressOptions } = await import('./client-ip')
 
   const instance = betterAuth({
     hooks: {
@@ -414,7 +414,15 @@ async function createAuth() {
     // takes precedence over that map entirely. Entry expiry lives in the
     // library's own window arithmetic (`lastRequest` vs the rule's window), so
     // this only has to hold and bound; the cache evicts oldest-first.
-    rateLimit: { customStorage: workspaceRateLimitStorage },
+    rateLimit: {
+      customStorage: workspaceRateLimitStorage,
+      // Requesting a device code is unauthenticated and mints a row, so it gets
+      // its own small budget per address. The rest of the device endpoints are
+      // closed to HTTP (see http-disabled-paths.ts); polling uses /oauth2/token.
+      customRules: {
+        '/device/code': { window: 60, max: 10 },
+      },
+    },
     // Route the library's internal logging through pino, redacted. Without it
     // those lines bypass the app logger entirely — unstructured, uncorrelated,
     // and on a resolution failure carrying the whole user-info payload
@@ -423,9 +431,8 @@ async function createAuth() {
     // Use SECRET_KEY for auth signing (Better Auth defaults to BETTER_AUTH_SECRET)
     secret: activeSecretKey(),
 
-    // Disable the JWT plugin's /token endpoint — conflicts with OAuth's /oauth2/token
-    // Does NOT affect magicLink or session management
-    disabledPaths: ['/token'],
+    // Closed to HTTP, still callable in process: see http-disabled-paths.ts.
+    disabledPaths: HTTP_DISABLED_AUTH_PATHS,
 
     database: drizzleAdapter(db, {
       provider: 'pg',
@@ -449,6 +456,8 @@ async function createAuth() {
         oauthResource: oauthResourceTable,
         oauthClientResource: oauthClientResourceTable,
         oauthClientAssertion: oauthClientAssertionTable,
+        // RFC 8628 device authorization (headless MCP / CLI sign-in)
+        deviceCode: deviceCodeTable,
         // The twoFactor plugin uses model name "twoFactor"; our Drizzle
         // table is `two_factor` (snake-case). The column→field mapping
         // (camelCase plugin field → snake_case column) is handled by
@@ -558,6 +567,9 @@ async function createAuth() {
     },
 
     advanced: {
+      // The client address comes from the app's own trusted resolution, never
+      // from a header the client can write. See `./client-ip`.
+      ipAddress: betterAuthIpAddressOptions,
       // Use TypeID format for user IDs to match our schema
       database: {
         generateId: ({ model }) => {
@@ -601,7 +613,7 @@ async function createAuth() {
                   const { generateAnonymousName } = await import('@/lib/shared/anonymous-names')
                   return generateAnonymousName(user.id)
                 })()
-              : user.name
+              : (accountDisplayName(user.name, user.email) ?? user.name)
             // Race-safe lazy create (the factory's onConflictDoNothing subsumes
             // the prior explicit findFirst guard). Always 'user' — team access is
             // via invitations only.
@@ -627,8 +639,10 @@ async function createAuth() {
               if (!isAnonymous) {
                 const { ensureAutoSubscribed } =
                   await import('@/lib/server/domains/changelog/changelog-subscription.service')
+                const { logSettingsReadError } =
+                  await import('@/lib/server/domains/settings/settings-log')
                 ensureAutoSubscribed(createdPrincipal.id as PrincipalId).catch((err) =>
-                  log.error({ err }, 'failed to auto-subscribe to changelog on signup')
+                  logSettingsReadError(log, err, 'failed to auto-subscribe to changelog on signup')
                 )
               }
             }
@@ -637,12 +651,7 @@ async function createAuth() {
       },
       session: {
         create: {
-          // Only the widget's lazy anonymous mint; everything else is a dashboard sign-in.
-          before: async (sessionData, context) => {
-            if (context?.path === '/sign-in/anonymous') {
-              return { data: { ...sessionData, scope: 'widget' } }
-            }
-          },
+          before: assignSessionScope,
         },
       },
     },
@@ -689,17 +698,8 @@ async function createAuth() {
           // `email-verification` (adding a first address) and `change-email`
           // (moving to a new one) both mean the same thing to the recipient:
           // prove you hold this address.
-          const { sendVerifyAddressEmail } = await import('@quackback/email')
-          const { getEmailSafeUrl } = await import('@/lib/server/storage/s3')
-          const settings = await db.query.settings.findFirst({
-            columns: { name: true, logoKey: true },
-          })
-          await sendVerifyAddressEmail({
-            to: email,
-            code: otp,
-            workspaceName: settings?.name ?? undefined,
-            logoUrl: getEmailSafeUrl(settings?.logoKey) ?? undefined,
-          })
+          const { sendVerifyAddressCode } = await import('./verify-address-email')
+          await sendVerifyAddressCode(email, otp)
         },
         otpLength: 6,
         expiresIn: 600,
@@ -770,6 +770,16 @@ async function createAuth() {
         },
       }),
 
+      // RFC 8628 device authorization grant on the same OAuth server: a
+      // headless client asks `/device/code`, the person approves the code at
+      // `/device` in a browser, and the client polls `/oauth2/token` with the
+      // device_code grant. Must follow `mcp()`, which supplies the provider.
+      oauthDeviceAuthorization({
+        verificationUri: '/device',
+        expiresIn: '10m',
+        interval: '5s',
+      }),
+
       // Generic OAuth plugin for custom OIDC providers (Okta, Auth0, Keycloak, etc.)
       ...(genericOAuthConfigs.length > 0 ? [genericOAuth({ config: genericOAuthConfigs })] : []),
 
@@ -822,7 +832,11 @@ async function createAuth() {
               name: newUser.user.name,
               email: newUser.user.email,
               image: newImage,
-              displayName: newUser.user.name || anonymousUser.user.name,
+              // A sign-in by email alone gives no name: show one from the
+              // address before the visitor's generated name, never "Anonymous".
+              displayName:
+                accountDisplayName(newUser.user.name, newUser.user.email) ??
+                (anonPrincipal?.displayName || anonymousUser.user.name),
             })
 
             // The principal's `type` flipped from 'anonymous' → 'user'; drop
@@ -938,7 +952,8 @@ export const auth = {
         return async (...args: unknown[]) => {
           const authInstance = await getAuth()
           const api = authInstance.api as Record<string, (...args: unknown[]) => unknown>
-          return api[prop as string](...args)
+          const { withTrustedClientIpArgs } = await import('./client-ip')
+          return api[prop as string](...withTrustedClientIpArgs(args))
         }
       },
     })
@@ -950,7 +965,8 @@ export const auth = {
       log.debug({ method: request.method, path: url.pathname }, 'magic-link request')
     }
     const authInstance = await getAuth()
-    const response = await authInstance.handler(request)
+    const { withTrustedClientIpRequest } = await import('./client-ip')
+    const response = await authInstance.handler(withTrustedClientIpRequest(request))
     if (isMagicLink) {
       log.debug({ status: response.status }, 'magic-link response')
     }

@@ -25,7 +25,7 @@ Hard rule (test-enforced, not just snapshotted): no package imports app code.
 Top-level directories of src, with lib split one level deeper; root-level files form `(root)`. The components -> lib/server edge is the TanStack Start server-function pattern, recorded as reality.
 
 Nodes (12): (root), components, integrations, lib/build, lib/client, lib/server, lib/shared, locales, routes, styles, test, types
-Edges (29):
+Edges (28):
 
 - (root) -> components
 - (root) -> lib/client
@@ -54,18 +54,20 @@ Edges (29):
 - routes -> lib/client
 - routes -> lib/server
 - routes -> lib/shared
-- routes -> styles
 - test -> lib/client
 
 ## 3. Server domains (lib/server/domains)
 
-Nodes (51): activity, admin-overview, ai, analytics, api, api-keys, assistant, attribute-definitions, billing, boards, changelog, channel-accounts, channels, comments, companies, company-attributes, conversation, conversation-attributes, conversation-views, embeddings, export, help-center, import, inbox, macros, merge-suggestions, moderation, notifications, office-hours, platform-credentials, post-tags, post-views, posts, principals, push-devices, roadmaps, roles, segments, sentiment, settings, sla, status, statuses, subscriptions, summary, teams, tickets, user-attributes, users, webhooks, workflows
-Edges (122):
+Nodes (54): activity, admin-overview, ai, analytics, api, api-keys, assistant, attribute-definitions, billing, boards, changelog, channel-accounts, channels, comments, companies, company-attributes, conversation, conversation-attributes, conversation-views, embeddings, export, files, help-center, import, inbox, macros, merge-suggestions, moderation, notifications, office-hours, onboarding, platform-credentials, post-tags, post-views, posts, principals, push-devices, roadmaps, roles, segments, sentiment, settings, settings-registry, sla, status, statuses, subscriptions, summary, teams, tickets, user-attributes, users, webhooks, workflows
+Edges (143):
 
+- activity -> principals
 - admin-overview -> changelog
+- ai -> settings
 - analytics -> api
 - analytics -> assistant
 - analytics -> principals
+- analytics -> settings
 - analytics -> workflows
 - api -> api-keys
 - api -> settings
@@ -74,13 +76,16 @@ Edges (122):
 - assistant -> ai
 - assistant -> api
 - assistant -> boards
+- assistant -> changelog
 - assistant -> conversation
 - assistant -> conversation-attributes
 - assistant -> embeddings
+- assistant -> files
 - assistant -> help-center
 - assistant -> post-tags
 - assistant -> posts
 - assistant -> principals
+- assistant -> segments
 - assistant -> settings
 - assistant -> status
 - assistant -> statuses
@@ -112,6 +117,7 @@ Edges (122):
 - conversation -> channels
 - conversation -> comments
 - conversation -> conversation-attributes
+- conversation -> files
 - conversation -> posts
 - conversation -> principals
 - conversation -> settings
@@ -129,6 +135,7 @@ Edges (122):
 - export -> companies
 - export -> conversation
 - export -> users
+- files -> principals
 - help-center -> ai
 - help-center -> principals
 - help-center -> settings
@@ -142,8 +149,15 @@ Edges (122):
 - merge-suggestions -> settings
 - moderation -> comments
 - moderation -> posts
+- onboarding -> api
+- onboarding -> api-keys
+- onboarding -> assistant
+- onboarding -> principals
+- onboarding -> settings
+- onboarding -> users
 - posts -> activity
 - posts -> ai
+- posts -> changelog
 - posts -> embeddings
 - posts -> merge-suggestions
 - posts -> principals
@@ -159,14 +173,20 @@ Edges (122):
 - settings -> ai
 - settings -> platform-credentials
 - settings -> sla
+- settings-registry -> api
+- settings-registry -> api-keys
+- settings-registry -> assistant
+- settings-registry -> settings
 - sla -> office-hours
 - sla -> settings
+- status -> settings
 - subscriptions -> changelog
 - subscriptions -> posts
 - subscriptions -> status
 - summary -> ai
 - summary -> settings
 - tickets -> conversation
+- tickets -> files
 - tickets -> principals
 - tickets -> settings
 - tickets -> sla
@@ -189,6 +209,6 @@ Edges (122):
 
 Strongly connected components with more than one domain. A new entry here is a new cycle and needs an explicit decision.
 
+- ai <-> settings <-> sla
 - assistant <-> channel-accounts <-> channels <-> conversation <-> conversation-attributes <-> inbox <-> tickets <-> workflows
 - changelog <-> embeddings <-> merge-suggestions <-> posts <-> subscriptions
-- settings <-> sla
